@@ -2,16 +2,7 @@
 
 Plants vs. Zombies in your terminal — ncurses-based, emoji-rendered, chiptune-powered.
 
-```
- SUN: 150   Wave: 1  Remaining: 8
- 1:🌻  50  2:🫛 100  3:🪨  50  4:🍒 150  5:🧊 175  0:🪏
-
-🚜  □   □   □   □   □   □   □   🧟  □
-    □   🌻  □   🫛  □   □   □   □   □
-    □   □   □   □   □   □  ·  · 🪖  □
-    □   🪨  □   □   □   □   □   □   □
-    □   □   □   □   □   □   □   🧟  □
-```
+![NPVZonGhostty](./docs/screenshots/NPVZonGhostty.png)
 
 ## Features
 
@@ -26,15 +17,15 @@ Plants vs. Zombies in your terminal — ncurses-based, emoji-rendered, chiptune-
 
 ## Controls
 
-| Key | Action |
-|-----|--------|
-| Arrow keys / WASD / HJKL | Move cursor |
-| 1–5 | Select plant |
-| 0 | Toggle shovel |
-| Enter / Space | Place plant or dig |
-| P | Pause / unpause |
-| Q | Quit |
-| R | Restart (end screen) |
+| Key                      | Action               |
+| ------------------------ | -------------------- |
+| Arrow keys / WASD / HJKL | Move cursor          |
+| 1–5                      | Select plant         |
+| 0                        | Toggle shovel        |
+| Enter / Space            | Place plant or dig   |
+| P                        | Pause / unpause      |
+| Q                        | Quit                 |
+| R                        | Restart (end screen) |
 
 ## Build
 

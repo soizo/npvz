@@ -1,19 +1,161 @@
 #define _XOPEN_SOURCE_EXTENDED 1
 #include "render.h"
 #include "ui.h"
+#include <errno.h>
 #include <locale.h>
 #include <ncurses.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
+#include <unistd.h>
 #include <wchar.h>
 
-/* layout constants */
-#define HUD_HEIGHT    3
-#define CELL_WIDTH    4   /* emoji(2) + spacing(2) */
-#define CELL_HEIGHT   2
-#define GRID_LEFT     6   /* leave room for mower column */
+#define HUD_HEIGHT 5
+#define CELL_WIDTH 4
+#define CELL_HEIGHT 2
+#define MOWER_LEFT 5
+#define GRID_LEFT 9
+#define GAME_MIN_ROWS 24
+#define GAME_MIN_COLS 80
+#define WIDTH_QUERY_TIMEOUT_US 50000
+#define BOARD_WIDTH (GRID_LEFT + BOARD_COLS * CELL_WIDTH + CELL_WIDTH)
+
+static const wchar_t *ARMED_MINE_EMOJI = L"🕹\uFE0F";
+static const wchar_t *ANGRY_ZOMBIE_EMOJI = L"😡\uFE0F";
+static const wchar_t *EXPLOSION_EMOJI = L"💥";
+static EmojiWidths emoji_widths;
+
+static int write_terminal(const char *bytes, size_t length) {
+    while (length > 0) {
+        ssize_t written = write(STDOUT_FILENO, bytes, length);
+        if (written < 0 && errno == EINTR) continue;
+        if (written <= 0) return 0;
+        bytes += written;
+        length -= (size_t)written;
+    }
+    return 1;
+}
+
+static int read_cursor_column(void) {
+    char response[32];
+    fd_set input;
+    struct timeval timeout = { .tv_sec = 0, .tv_usec = WIDTH_QUERY_TIMEOUT_US };
+    if (!write_terminal("\033[6n", 4)) return -1;
+
+    FD_ZERO(&input);
+    FD_SET(STDIN_FILENO, &input);
+    if (select(STDIN_FILENO + 1, &input, NULL, NULL, &timeout) <= 0) return -1;
+    ssize_t used = read(STDIN_FILENO, response, sizeof(response) - 1);
+    if (used <= 0) return -1;
+    response[used] = '\0';
+
+    for (ssize_t i = 0; i < used; i++) {
+        int row, col;
+        if (response[i] == '\033'
+            && sscanf(response + i, "\033[%d;%dR", &row, &col) == 2)
+            return col;
+    }
+    return -1;
+}
+
+static int measure_terminal_width(const wchar_t *glyph) {
+    char utf8[32];
+    mbstate_t state = {0};
+    const wchar_t *source = glyph;
+    size_t length = wcsrtombs(utf8, &source, sizeof(utf8), &state);
+    if (length == (size_t)-1 || source != NULL) return -1;
+    if (!write_terminal("\033[H", 3)
+        || !write_terminal(utf8, length)) return -1;
+
+    int width = read_cursor_column() - 1;
+    return width >= 1 && width <= 8 ? width : -1;
+}
+
+static int fallback_width(const wchar_t *glyph) {
+    int width = wcswidth(glyph, 8);
+    return width > 0 ? width : 2;
+}
+
+static void set_fallback_widths(EmojiWidths *widths) {
+    for (int type = PLANT_SUNFLOWER; type < PLANT_COUNT; type++)
+        widths->plants[type] = fallback_width(PLANT_DEFS[type].emoji);
+    for (int type = ZOMBIE_NORMAL; type < ZOMBIE_TYPE_COUNT; type++)
+        widths->zombies[type] = fallback_width(ZOMBIE_DEFS[type].emoji);
+    widths->mower = fallback_width(MOWER_EMOJI);
+    widths->armed_mine = fallback_width(ARMED_MINE_EMOJI);
+    widths->angry_zombie = fallback_width(ANGRY_ZOMBIE_EMOJI);
+    widths->explosion = fallback_width(EXPLOSION_EMOJI);
+}
+
+static void calibrate_emoji_widths(void) {
+    EmojiWidths widths = {0};
+    int table_enabled = 1;
+
+    erase();
+    refresh();
+    for (int type = PLANT_SUNFLOWER; type < PLANT_COUNT && table_enabled; type++) {
+        widths.plants[type] = measure_terminal_width(PLANT_DEFS[type].emoji);
+        table_enabled = widths.plants[type] > 0;
+    }
+    for (int type = ZOMBIE_NORMAL; type < ZOMBIE_TYPE_COUNT && table_enabled; type++) {
+        widths.zombies[type] = measure_terminal_width(ZOMBIE_DEFS[type].emoji);
+        table_enabled = widths.zombies[type] > 0;
+    }
+    if (table_enabled) {
+        widths.mower = measure_terminal_width(MOWER_EMOJI);
+        widths.armed_mine = measure_terminal_width(ARMED_MINE_EMOJI);
+        widths.angry_zombie = measure_terminal_width(ANGRY_ZOMBIE_EMOJI);
+        widths.explosion = measure_terminal_width(EXPLOSION_EMOJI);
+        table_enabled = widths.mower > 0 && widths.armed_mine > 0
+                     && widths.angry_zombie > 0 && widths.explosion > 0;
+    }
+    if (!table_enabled) set_fallback_widths(&widths);
+
+    emoji_widths = widths;
+    ui_set_emoji_widths(&widths, table_enabled);
+    clearok(stdscr, TRUE);
+    erase();
+    refresh();
+}
+
+static void add_field_separator(void) {
+    addch(' ');
+    addch(ACS_VLINE);
+    addch(' ');
+}
 
 static int grid_top(void) {
-    return HUD_HEIGHT + 1;
+    return HUD_HEIGHT;
+}
+
+static int grid_bottom(void) {
+    return grid_top() + BOARD_ROWS * CELL_HEIGHT;
+}
+
+static void screen_min_size(GameState state, int *rows, int *cols) {
+    if (state == STATE_MENU) {
+        *rows = 18;
+        *cols = 50;
+    } else if (state == STATE_CARD_SELECT) {
+        *rows = 22;
+        *cols = 80;
+    } else {
+        *rows = GAME_MIN_ROWS;
+        *cols = GAME_MIN_COLS;
+    }
+}
+
+static void draw_size_gate(int rows, int cols, int min_rows, int min_cols) {
+    int y = rows / 2;
+    int x = cols > 34 ? (cols - 34) / 2 : 0;
+
+    attron(A_BOLD | COLOR_PAIR(UI_PAIR_DANGER));
+    mvprintw(y - 1, x, "NPVZ NEEDS %dx%d", min_cols, min_rows);
+    attroff(A_BOLD | COLOR_PAIR(UI_PAIR_DANGER));
+    mvprintw(y + 1, x, "CURRENT %dx%d", cols, rows);
+    add_field_separator();
+    printw("RESIZE TO CONTINUE");
 }
 
 void render_init(void) {
@@ -23,179 +165,238 @@ void render_init(void) {
     noecho();
     curs_set(0);
     keypad(stdscr, TRUE);
-    nodelay(stdscr, TRUE);
-    start_color();
-    use_default_colors();
 
-    /* color pairs */
-    init_pair(1, COLOR_YELLOW, -1);   /* sun/sunflower */
-    init_pair(2, COLOR_GREEN, -1);    /* plants */
-    init_pair(3, COLOR_RED, -1);      /* zombies */
-    init_pair(4, COLOR_CYAN, -1);     /* snow pea / projectiles */
-    init_pair(5, COLOR_WHITE, -1);    /* grid */
-    init_pair(6, COLOR_BLACK, COLOR_YELLOW); /* cursor highlight */
+    if (has_colors()) {
+        start_color();
+        use_default_colors();
+        init_pair(UI_PAIR_SUN, COLOR_YELLOW, -1);
+        init_pair(UI_PAIR_READY, COLOR_GREEN, -1);
+        init_pair(UI_PAIR_DANGER, COLOR_MAGENTA, -1);
+        init_pair(UI_PAIR_INFO, COLOR_CYAN, -1);
+        init_pair(UI_PAIR_GRID, COLOR_WHITE, -1);
+        init_pair(UI_PAIR_CURSOR, COLOR_BLACK, COLOR_GREEN);
 
-    /* flash effects */
-    if (COLORS >= 256) {
-        init_pair(7, -1, 240);    /* hit flash: gray bg */
-        init_pair(8, -1, 255);    /* death flash: white bg */
-    } else {
-        init_pair(7, -1, COLOR_WHITE);    /* hit: white bg fallback */
-        init_pair(8, COLOR_BLACK, COLOR_WHITE); /* death: bright white fallback */
+        if (COLORS >= 256) {
+            init_pair(UI_PAIR_HIT, -1, 240);
+            init_pair(UI_PAIR_DEATH, -1, 255);
+        } else {
+            init_pair(UI_PAIR_HIT, -1, COLOR_WHITE);
+            init_pair(UI_PAIR_DEATH, COLOR_BLACK, COLOR_WHITE);
+        }
     }
+
+    calibrate_emoji_widths();
+    nodelay(stdscr, TRUE);
 }
 
 void render_cleanup(void) {
     endwin();
 }
 
-static void clear_grid_area(void) {
-    int top = grid_top();
-    int total_w = GRID_LEFT + BOARD_COLS * CELL_WIDTH + CELL_WIDTH;
-    for (int r = 0; r < BOARD_ROWS; r++) {
-        int y = top + r * CELL_HEIGHT;
-        move(y, 0);
-        for (int i = 0; i < total_w; i++) addch(' ');
-        move(y + 1, 0);
-        for (int i = 0; i < total_w; i++) addch(' ');
+typedef struct {
+    int before[BOARD_ROWS][BOARD_WIDTH + 1];
+} BoardLayout;
+
+static int glyph_delta(const wchar_t *glyph, int terminal_width) {
+    return fallback_width(glyph) - terminal_width;
+}
+
+static int plant_delta(PlantType type) {
+    return glyph_delta(PLANT_DEFS[type].emoji, emoji_widths.plants[type]);
+}
+
+static const wchar_t *plant_glyph(const Plant *plant, int *terminal_width) {
+    if (plant->type == PLANT_POTATOMINE && plant->explode_timer > 0) {
+        *terminal_width = emoji_widths.armed_mine;
+        return ARMED_MINE_EMOJI;
+    }
+    *terminal_width = emoji_widths.plants[plant->type];
+    return PLANT_DEFS[plant->type].emoji;
+}
+
+static const wchar_t *zombie_glyph(const Zombie *zombie, int *terminal_width) {
+    if (zombie->type == ZOMBIE_NEWSPAPER && zombie->armor_hp <= 0) {
+        *terminal_width = emoji_widths.angry_zombie;
+        return ANGRY_ZOMBIE_EMOJI;
+    }
+    *terminal_width = emoji_widths.zombies[zombie->type];
+    return ZOMBIE_DEFS[zombie->type].emoji;
+}
+
+static int projectile_visible(const Board *b, const Projectile *projectile) {
+    int x = GRID_LEFT + (int)(projectile->x * CELL_WIDTH);
+    int cell_col = (int)projectile->x;
+    if (cell_col >= 0 && cell_col < BOARD_COLS) {
+        int cell_x = GRID_LEFT + cell_col * CELL_WIDTH;
+        if (x >= cell_x && x < cell_x + 2
+            && b->cells[projectile->row][cell_col].type != PLANT_NONE
+            && b->cells[projectile->row][cell_col].hp > 0)
+            return 0;
+    }
+    return x >= GRID_LEFT;
+}
+
+static void build_board_layout(const Board *b, BoardLayout *layout) {
+    int delta_at[BOARD_ROWS][BOARD_WIDTH] = {{0}};
+
+    for (int row = 0; row < BOARD_ROWS; row++) {
+        if (b->mowers[row].active && !b->mowers[row].triggered)
+            delta_at[row][MOWER_LEFT] = glyph_delta(MOWER_EMOJI, emoji_widths.mower);
+        for (int col = 0; col < BOARD_COLS; col++) {
+            const Plant *plant = &b->cells[row][col];
+            if (plant->type == PLANT_NONE || plant->hp <= 0) continue;
+            int terminal_width;
+            const wchar_t *glyph = plant_glyph(plant, &terminal_width);
+            delta_at[row][GRID_LEFT + col * CELL_WIDTH] = glyph_delta(glyph, terminal_width);
+        }
+    }
+    for (int i = 0; i < b->vfx_count; i++) {
+        const Vfx *vfx = &b->vfx[i];
+        int x = GRID_LEFT + (int)(vfx->x * CELL_WIDTH);
+        if (x < 0 || x >= BOARD_WIDTH) continue;
+        if (vfx->type == VFX_DEATH_BOOM) {
+            delta_at[vfx->row][x] = glyph_delta(EXPLOSION_EMOJI, emoji_widths.explosion);
+        } else {
+            delta_at[vfx->row][x] = 0;
+            if (x + 1 < BOARD_WIDTH) delta_at[vfx->row][x + 1] = 0;
+        }
+    }
+    for (int i = 0; i < b->zombie_count; i++) {
+        const Zombie *zombie = &b->zombies[i];
+        int x = GRID_LEFT + (int)(zombie->x * CELL_WIDTH);
+        if (!zombie->alive || x < 0 || x >= BOARD_WIDTH) continue;
+        int terminal_width;
+        const wchar_t *glyph = zombie_glyph(zombie, &terminal_width);
+        delta_at[zombie->row][x] = glyph_delta(glyph, terminal_width);
+    }
+    for (int i = 0; i < b->projectile_count; i++) {
+        const Projectile *projectile = &b->projectiles[i];
+        int x = GRID_LEFT + (int)(projectile->x * CELL_WIDTH);
+        if (projectile->alive && projectile_visible(b, projectile)
+            && x >= 0 && x < BOARD_WIDTH)
+            delta_at[projectile->row][x] = 0;
+    }
+
+    for (int row = 0; row < BOARD_ROWS; row++) {
+        layout->before[row][0] = 0;
+        for (int x = 0; x < BOARD_WIDTH; x++)
+            layout->before[row][x + 1] = layout->before[row][x] + delta_at[row][x];
     }
 }
 
-static void draw_grid(const Board *b, int cursor_row, int cursor_col) {
-    int top = grid_top();
+static int board_x(const BoardLayout *layout, int row, int physical_x) {
+    if (physical_x < 0) return physical_x;
+    if (physical_x > BOARD_WIDTH) physical_x = BOARD_WIDTH;
+    return physical_x + layout->before[row][physical_x];
+}
 
-    /* force-clear the grid area with single-width spaces to
-       eliminate any wide-character ghosts from the previous frame */
+static void clear_grid_area(void) {
+    for (int row = 0; row < BOARD_ROWS * CELL_HEIGHT; row++) {
+        move(grid_top() + row, 0);
+        clrtoeol();
+    }
+}
+
+static void draw_grid(const Board *b, const BoardLayout *layout,
+                      int cursor_row, int cursor_col) {
     clear_grid_area();
 
-    for (int r = 0; r < BOARD_ROWS; r++) {
-        int y = top + r * CELL_HEIGHT;
+    for (int row = 0; row < BOARD_ROWS; row++) {
+        int y = grid_top() + row * CELL_HEIGHT;
+        mvprintw(y, 0, "%02d ▸", row + 1);
 
-        /* draw mower */
-        if (b->mowers[r].active && !b->mowers[r].triggered) {
-            mvprintw(y, 0, "🚜");
-        } else {
-            mvprintw(y, 0, "  ");
-        }
+        if (b->mowers[row].active && !b->mowers[row].triggered)
+            mvprintw(y, board_x(layout, row, MOWER_LEFT), "%ls", MOWER_EMOJI);
 
-        for (int c = 0; c < BOARD_COLS; c++) {
-            int x = GRID_LEFT + c * CELL_WIDTH;
-            const Plant *p = &b->cells[r][c];
+        for (int col = 0; col < BOARD_COLS; col++) {
+            int x = board_x(layout, row, GRID_LEFT + col * CELL_WIDTH);
+            const Plant *plant = &b->cells[row][col];
+            int selected = row == cursor_row && col == cursor_col;
 
-            /* highlight cursor */
-            if (r == cursor_row && c == cursor_col) {
-                attron(COLOR_PAIR(6));
-            }
-
-            if (p->type != PLANT_NONE && p->hp > 0) {
-                /* potato mine: show brown circle when unarmed */
-                if (p->type == PLANT_POTATOMINE && p->explode_timer > 0) {
-                    mvprintw(y, x, "%ls", L"🕹️");
-                } else {
-                    mvprintw(y, x, "%ls", PLANT_DEFS[p->type].emoji);
-                }
+            if (selected) attron(COLOR_PAIR(UI_PAIR_CURSOR) | A_BOLD);
+            if (plant->type != PLANT_NONE && plant->hp > 0) {
+                int terminal_width;
+                const wchar_t *glyph = plant_glyph(plant, &terminal_width);
+                (void)terminal_width;
+                mvprintw(y, x, "%ls", glyph);
             } else {
-                /* empty cell: □ */
-                mvprintw(y, x, "□");
+                mvprintw(y, x, "%ls", selected ? L"◆" : L"·");
             }
-
-            if (r == cursor_row && c == cursor_col) {
-                attroff(COLOR_PAIR(6));
-            }
+            if (selected) attroff(COLOR_PAIR(UI_PAIR_CURSOR) | A_BOLD);
         }
     }
 }
 
-static int zombie_total_hp(const Zombie *z) {
-    return z->hp + z->armor_hp;
+static int zombie_total_hp(const Zombie *zombie) {
+    return zombie->hp + zombie->armor_hp;
 }
 
-static void draw_zombies(const Board *b) {
-    int top = grid_top();
-
-    /* build sorted index: ascending by total HP so highest HP draws last (on top) */
-    int idx[MAX_ZOMBIES];
+static void draw_zombies(const Board *b, const BoardLayout *layout) {
+    int indices[MAX_ZOMBIES];
     int count = 0;
+
     for (int i = 0; i < b->zombie_count; i++) {
-        if (b->zombies[i].alive) idx[count++] = i;
+        if (b->zombies[i].alive) indices[count++] = i;
     }
     for (int i = 1; i < count; i++) {
-        int key = idx[i];
+        int key = indices[i];
         int j = i - 1;
-        while (j >= 0 && zombie_total_hp(&b->zombies[idx[j]]) > zombie_total_hp(&b->zombies[key])) {
-            idx[j + 1] = idx[j];
+        while (j >= 0
+               && zombie_total_hp(&b->zombies[indices[j]]) > zombie_total_hp(&b->zombies[key])) {
+            indices[j + 1] = indices[j];
             j--;
         }
-        idx[j + 1] = key;
+        indices[j + 1] = key;
     }
 
+    attron(COLOR_PAIR(UI_PAIR_DANGER));
     for (int i = 0; i < count; i++) {
-        const Zombie *z = &b->zombies[idx[i]];
-        int y = top + z->row * CELL_HEIGHT;
-        int x = GRID_LEFT + (int)(z->x * CELL_WIDTH);
-        if (x >= GRID_LEFT && x < GRID_LEFT + BOARD_COLS * CELL_WIDTH + CELL_WIDTH) {
-            attron(COLOR_PAIR(3));
-            /* newspaper zombie shows 😡 when enraged (paper destroyed) */
-            if (z->type == ZOMBIE_NEWSPAPER && z->armor_hp <= 0) {
-                mvprintw(y, x, "%ls", L"😡");
-            } else {
-                mvprintw(y, x, "%ls", ZOMBIE_DEFS[z->type].emoji);
-            }
-            attroff(COLOR_PAIR(3));
-        }
+        const Zombie *zombie = &b->zombies[indices[i]];
+        int y = grid_top() + zombie->row * CELL_HEIGHT;
+        int physical_x = GRID_LEFT + (int)(zombie->x * CELL_WIDTH);
+        if (physical_x < GRID_LEFT || physical_x >= BOARD_WIDTH) continue;
+
+        int terminal_width;
+        const wchar_t *glyph = zombie_glyph(zombie, &terminal_width);
+        (void)terminal_width;
+        mvprintw(y, board_x(layout, zombie->row, physical_x), "%ls", glyph);
     }
+    attroff(COLOR_PAIR(UI_PAIR_DANGER));
 }
 
-static void draw_projectiles(const Board *b) {
-    int top = grid_top();
-    attron(COLOR_PAIR(4));
+static void draw_projectiles(const Board *b, const BoardLayout *layout) {
+    attron(COLOR_PAIR(UI_PAIR_INFO));
     for (int i = 0; i < b->projectile_count; i++) {
-        const Projectile *pr = &b->projectiles[i];
-        if (!pr->alive) continue;
-        int y = top + pr->row * CELL_HEIGHT;
-        int x = GRID_LEFT + (int)(pr->x * CELL_WIDTH);
+        const Projectile *projectile = &b->projectiles[i];
+        if (!projectile->alive) continue;
 
-        /* skip drawing if projectile overlaps a plant cell */
-        int cell_col = (int)pr->x;
-        if (cell_col >= 0 && cell_col < BOARD_COLS) {
-            int cell_x = GRID_LEFT + cell_col * CELL_WIDTH;
-            /* emoji occupies 2 columns at cell_x; skip if overlapping */
-            if (x >= cell_x && x < cell_x + 2
-                && b->cells[pr->row][cell_col].type != PLANT_NONE
-                && b->cells[pr->row][cell_col].hp > 0) {
-                continue;
-            }
-        }
-
-        if (x >= GRID_LEFT) {
-            mvprintw(y, x, "\xC2\xB7");  /* middle dot · U+00B7 */
-        }
+        int y = grid_top() + projectile->row * CELL_HEIGHT;
+        int physical_x = GRID_LEFT + (int)(projectile->x * CELL_WIDTH);
+        if (projectile_visible(b, projectile))
+            mvprintw(y, board_x(layout, projectile->row, physical_x), "·");
     }
-    attroff(COLOR_PAIR(4));
+    attroff(COLOR_PAIR(UI_PAIR_INFO));
 }
 
-/* draw VFX backgrounds — called before grid so content layers on top,
-   but the background color bleeds through */
-static void draw_vfx_bg(const Board *b) {
-    int top = grid_top();
+static void draw_vfx_bg(const Board *b, const BoardLayout *layout) {
     for (int i = 0; i < b->vfx_count; i++) {
-        const Vfx *v = &b->vfx[i];
-        int x = GRID_LEFT + (int)(v->x * CELL_WIDTH);
-        int y = top + v->row * CELL_HEIGHT;
+        const Vfx *vfx = &b->vfx[i];
+        int physical_x = GRID_LEFT + (int)(vfx->x * CELL_WIDTH);
+        int x = board_x(layout, vfx->row, physical_x);
+        int y = grid_top() + vfx->row * CELL_HEIGHT;
 
-        if (v->type == VFX_HIT) {
-            attron(COLOR_PAIR(7));
+        if (vfx->type == VFX_HIT) {
+            attron(COLOR_PAIR(UI_PAIR_HIT));
             mvprintw(y, x, "  ");
-            attroff(COLOR_PAIR(7));
-        } else if (v->type == VFX_DEATH_SHOT) {
-            attron(COLOR_PAIR(8));
+            attroff(COLOR_PAIR(UI_PAIR_HIT));
+        } else if (vfx->type == VFX_DEATH_SHOT) {
+            attron(COLOR_PAIR(UI_PAIR_DEATH));
             mvprintw(y, x, "  ");
-            attroff(COLOR_PAIR(8));
-        } else if (v->type == VFX_DEATH_BOOM) {
-            /* white bg + 💥 */
-            attron(COLOR_PAIR(8));
-            mvprintw(y, x, "💥");
-            attroff(COLOR_PAIR(8));
+            attroff(COLOR_PAIR(UI_PAIR_DEATH));
+        } else if (vfx->type == VFX_DEATH_BOOM) {
+            attron(COLOR_PAIR(UI_PAIR_DEATH));
+            mvprintw(y, x, "%ls", EXPLOSION_EMOJI);
+            attroff(COLOR_PAIR(UI_PAIR_DEATH));
         }
     }
 }
@@ -203,123 +404,160 @@ static void draw_vfx_bg(const Board *b) {
 static void draw_menu(const Game *g) {
     int rows, cols;
     getmaxyx(stdscr, rows, cols);
-    int cy = rows / 2 - 4;
-    int cx = cols / 2;
+    int top = (rows - 14) / 2;
+    int left = cols / 2 - 12;
 
-    attron(A_BOLD | COLOR_PAIR(2));
-    mvprintw(cy,   cx - 10, "                        ");
-    mvprintw(cy,   cx - 10, " _ __  _ ____   _____");
-    mvprintw(cy+1, cx - 10, "| '_ \\| '_ \\ \\ / /_  /");
-    mvprintw(cy+2, cx - 10, "| | | | |_) \\ V / / / ");
-    mvprintw(cy+3, cx - 10, "|_| |_| .__/ \\_/ /___|");
-    mvprintw(cy+4, cx - 10, "      |_|              ");
-    attroff(A_BOLD | COLOR_PAIR(2));
+    attron(A_BOLD | COLOR_PAIR(UI_PAIR_READY));
+    mvprintw(top, left,     " _ __  _ ____   _____");
+    mvprintw(top + 1, left, "| '_ \\| '_ \\ \\ / /_  /");
+    mvprintw(top + 2, left, "| | | | |_) \\ V / / / ");
+    mvprintw(top + 3, left, "|_| |_| .__/ \\_/ /___|");
+    mvprintw(top + 4, left, "      |_|              ");
+    attroff(A_BOLD | COLOR_PAIR(UI_PAIR_READY));
 
-    cy += 7;
-    const char *options[] = { "Level Mode  (5 waves)", "Endless Mode" };
+    static const char *labels[] = { "LEVEL//5 WAVES", "ENDLESS//NO LIMIT" };
+    static const char *descriptions[] = {
+        "Clear five waves to win.",
+        "Survive accelerating waves."
+    };
+
     for (int i = 0; i < 2; i++) {
-        if (i == g->menu_selection) {
-            attron(A_REVERSE | A_BOLD);
-            mvprintw(cy + i * 2, cx - 12, "  > %s  ", options[i]);
-            attroff(A_REVERSE | A_BOLD);
-        } else {
-            mvprintw(cy + i * 2, cx - 12, "    %s  ", options[i]);
-        }
+        int y = top + 7 + i * 3;
+        if (i == g->menu_selection) attron(A_REVERSE | A_BOLD);
+        mvprintw(y, cols / 2 - 12, "%c %-20s",
+                 i == g->menu_selection ? '>' : ' ', labels[i]);
+        if (i == g->menu_selection) attroff(A_REVERSE | A_BOLD);
+        attron(A_DIM);
+        mvprintw(y + 1, cols / 2 - 12, "  %s", descriptions[i]);
+        attroff(A_DIM);
     }
 
-    mvprintw(cy + 5, cx - 14, "[Up/Down] Select  [Enter] Start  [Q] Quit");
+    attron(COLOR_PAIR(UI_PAIR_INFO));
+    mvprintw(top + 13, cols / 2 - 21,
+             "MOVE//UP DOWN  START//ENTER  QUIT//Q");
+    attroff(COLOR_PAIR(UI_PAIR_INFO));
+}
+
+static int deck_contains(const Game *g, PlantType type) {
+    for (int i = 0; i < g->deck_count; i++) {
+        if (g->deck[i] == type) return 1;
+    }
+    return 0;
 }
 
 static void draw_card_select(const Game *g) {
     int rows, cols;
     getmaxyx(stdscr, rows, cols);
     (void)rows;
-    int cx = cols / 2;
-    int y = 2;
 
-    attron(A_BOLD | COLOR_PAIR(2));
-    mvprintw(y, cx - 12, "=== Choose Your Plants ===");
-    attroff(A_BOLD | COLOR_PAIR(2));
+    attron(A_BOLD | COLOR_PAIR(UI_PAIR_READY));
+    mvprintw(1, 2, "CHOOSE YOUR PLANTS");
+    attroff(A_BOLD | COLOR_PAIR(UI_PAIR_READY));
+    mvprintw(2, 2, "DECK//%d OF %d", g->deck_count, g->max_slots);
 
-    y += 2;
-    mvprintw(y, cx - 16, "Slots: %d  [Left/Right to adjust 6-9]", g->max_slots);
-    y += 1;
-    mvprintw(y, cx - 16, "Deck:  %d / %d", g->deck_count, g->max_slots);
-    y += 2;
-
-    /* show selected deck */
-    {
-        int dx = cx - 16;
-        mvprintw(y, dx, "Deck: ");
-        dx += 6;
-        for (int i = 0; i < g->deck_count; i++) {
-            const PlantDef *def = &PLANT_DEFS[g->deck[i]];
-            mvprintw(y, dx, "%d:%ls ", i + 1, def->emoji);
-            dx += 5;
+    int x = 2;
+    int deck_delta = 0;
+    for (int i = 0; i < g->max_slots; i++) {
+        int draw_x = x + deck_delta;
+        if (i < g->deck_count) {
+            PlantType type = g->deck[i];
+            mvprintw(3, draw_x, "%d:%ls", i + 1, PLANT_DEFS[type].emoji);
+            deck_delta += plant_delta(type);
+        } else {
+            mvprintw(3, draw_x, "[ ]");
         }
-        for (int i = g->deck_count; i < g->max_slots; i++) {
-            mvprintw(y, dx, "[ ] ");
-            dx += 4;
-        }
+        x += 5;
     }
-    y += 2;
 
-    /* list all available plants */
+    attron(COLOR_PAIR(UI_PAIR_INFO));
+    mvprintw(4, 2, "PLANT LIST");
+    mvprintw(4, 40, "PLANT DATA");
+    attroff(COLOR_PAIR(UI_PAIR_INFO));
+
     for (int i = 1; i < PLANT_COUNT; i++) {
         const PlantDef *def = &PLANT_DEFS[i];
-        int in_deck = 0;
-        for (int j = 0; j < g->deck_count; j++) {
-            if (g->deck[j] == (PlantType)i) { in_deck = 1; break; }
-        }
+        int y = 5 + i - 1;
+        int selected = g->card_cursor == i - 1;
+        int in_deck = deck_contains(g, (PlantType)i);
 
-        int is_cursor = (g->card_cursor == i - 1);
-        if (is_cursor) attron(A_REVERSE);
-        if (in_deck) attron(A_BOLD | COLOR_PAIR(1));
-
-        mvprintw(y, cx - 16, " %ls %-12s  %3d sun  %s ",
-                 def->emoji, def->name, def->cost,
-                 in_deck ? "[*]" : "[ ]");
-
-        if (in_deck) attroff(A_BOLD | COLOR_PAIR(1));
-        if (is_cursor) attroff(A_REVERSE);
-        y++;
+        if (selected) attron(A_REVERSE);
+        if (in_deck) attron(A_BOLD | COLOR_PAIR(UI_PAIR_READY));
+        int curses_width = fallback_width(def->emoji);
+        int name_x = 5 + plant_delta((PlantType)i);
+        mvprintw(y, 2, "%ls", def->emoji);
+        for (int cell = 2 + curses_width; cell < name_x; cell++)
+            mvaddch(y, cell, ' ' | A_BOLD);
+        mvprintw(y, name_x, "%-12s %3d  %-9s",
+                 def->name, def->cost, in_deck ? "IN DECK" : "AVAILABLE");
+        if (in_deck) attroff(A_BOLD | COLOR_PAIR(UI_PAIR_READY));
+        if (selected) attroff(A_REVERSE);
     }
 
-    y += 1;
-    mvprintw(y, cx - 18, "[Up/Down]Navigate [Enter]Toggle [G]Start [Q]Back");
+    const PlantDef *focused = &PLANT_DEFS[g->card_cursor + 1];
+    mvprintw(6, 40, "PLANT//%s", focused->name);
+    mvprintw(8, 40, "COST   %d SUN", focused->cost);
+    mvprintw(9, 40, "HEALTH %d", focused->hp);
+    if (focused->shoot_interval > 0)
+        mvprintw(10, 40, "ATTACK %d TICKS", focused->shoot_interval);
+    else
+        mvprintw(10, 40, "ATTACK -");
+    if (focused->sun_interval > 0)
+        mvprintw(11, 40, "SUN    %d TICKS", focused->sun_interval);
+    else
+        mvprintw(11, 40, "SUN    -");
+
+    ui_draw_feedback(g, 17);
+    if (g->deck_count == 0) {
+        attron(A_DIM);
+        mvprintw(18, 2, "START//G");
+        add_field_separator();
+        printw("SELECT AT LEAST ONE PLANT");
+        attroff(A_DIM);
+    }
+    attron(COLOR_PAIR(UI_PAIR_INFO));
+    mvprintw(20, (cols - 68) / 2,
+             "MOVE//UP DOWN  TOGGLE//ENTER  SLOTS//LEFT RIGHT  START//G  BACK//Q");
+    attroff(COLOR_PAIR(UI_PAIR_INFO));
 }
 
 void render_frame(const Game *g) {
+    int rows, cols, min_rows, min_cols;
     erase();
+    getmaxyx(stdscr, rows, cols);
+    screen_min_size(g->state, &min_rows, &min_cols);
+    if (rows < min_rows || cols < min_cols) {
+        draw_size_gate(rows, cols, min_rows, min_cols);
+        refresh();
+        return;
+    }
 
     if (g->state == STATE_MENU) {
         draw_menu(g);
         refresh();
         return;
     }
-
     if (g->state == STATE_CARD_SELECT) {
         draw_card_select(g);
         refresh();
         return;
     }
 
+    BoardLayout layout;
+    build_board_layout(&g->board, &layout);
     ui_draw_hud(g, 0);
-    draw_grid(&g->board, g->cursor_row, g->cursor_col);
-    draw_vfx_bg(&g->board);
-    draw_zombies(&g->board);
-    draw_projectiles(&g->board);
+    draw_grid(&g->board, &layout, g->cursor_row, g->cursor_col);
+    draw_vfx_bg(&g->board, &layout);
+    draw_zombies(&g->board, &layout);
+    draw_projectiles(&g->board, &layout);
+    ui_draw_game_footer(g, grid_bottom());
 
-    if (g->state == STATE_WON || g->state == STATE_LOST) {
-        ui_draw_endscreen(g);
-    }
-
-    if (g->state == STATE_PAUSED) {
-        int rows, cols;
-        getmaxyx(stdscr, rows, cols);
-        (void)rows;
-        mvprintw(grid_top() + BOARD_ROWS, (cols - 10) / 2, "[ PAUSED ]");
-    }
+    int overlay_center = (grid_top() + grid_bottom() - 1) / 2;
+    if (g->state == STATE_WON || g->state == STATE_LOST)
+        ui_draw_endscreen(g, overlay_center);
+    else if (g->help_visible)
+        ui_draw_help(g, overlay_center);
+    else if (g->state == STATE_PAUSED)
+        ui_draw_pause(overlay_center);
 
     refresh();
 }

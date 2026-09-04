@@ -1,15 +1,15 @@
 #include "zombie.h"
 
 const ZombieDef ZOMBIE_DEFS[ZOMBIE_TYPE_COUNT] = {
-    [ZOMBIE_NORMAL]     = { L"🧟", "Zombie",      100, 0.005f, 10 },
-    [ZOMBIE_CONEHEAD]   = { L"🪖", "Conehead",    100, 0.005f, 10 },
-    [ZOMBIE_BUCKETHEAD] = { L"🪣", "Buckethead",  100, 0.004f, 10 },
-    [ZOMBIE_DANCER]     = { L"🕺", "Dancer",      150, 0.006f, 10 },
-    [ZOMBIE_BACKUP]     = { L"👯", "Backup",       80, 0.007f,  8 },
-    [ZOMBIE_POLEVAULTER]= { L"🏌️", "Pole Vaulter",150, 0.008f, 10 },
-    [ZOMBIE_NEWSPAPER]  = { L"📰", "Newspaper",   100, 0.003f, 10 },
-    [ZOMBIE_FOOTBALL]   = { L"🏈", "Football",    200, 0.008f, 12 },
-    [ZOMBIE_SCREENDOOR] = { L"🚪", "Screen Door", 100, 0.004f, 10 },
+    [ZOMBIE_NORMAL]     = { L"🧟\uFE0F", "Zombie",      100, 0.005f, 10 },
+    [ZOMBIE_CONEHEAD]   = { L"🪖\uFE0F", "Conehead",    100, 0.005f, 10 },
+    [ZOMBIE_BUCKETHEAD] = { L"🪣\uFE0F", "Buckethead",  100, 0.004f, 10 },
+    [ZOMBIE_DANCER]     = { L"🕺\uFE0F", "Dancer",      150, 0.006f, 10 },
+    [ZOMBIE_BACKUP]     = { L"👯\uFE0F", "Backup",       80, 0.007f,  8 },
+    [ZOMBIE_POLEVAULTER]= { L"🏌\uFE0F", "Pole Vaulter",150, 0.008f, 10 },
+    [ZOMBIE_NEWSPAPER]  = { L"📰\uFE0F", "Newspaper",   100, 0.003f, 10 },
+    [ZOMBIE_FOOTBALL]   = { L"🏈\uFE0F", "Football",    200, 0.008f, 12 },
+    [ZOMBIE_SCREENDOOR] = { L"🚪\uFE0F", "Screen Door", 100, 0.004f, 10 },
 };
 
 /* armor HP by type */

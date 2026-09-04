@@ -1,5 +1,7 @@
 npvz
 src/*.o
 .pi/
+.superpowers/
+.dotdotgod/
 docs/superpowers/
 tests/test_rules

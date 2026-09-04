@@ -4,6 +4,12 @@ const ZombieDef ZOMBIE_DEFS[ZOMBIE_TYPE_COUNT] = {
     [ZOMBIE_NORMAL]     = { L"🧟", "Zombie",      100, 0.005f, 10 },
     [ZOMBIE_CONEHEAD]   = { L"🪖", "Conehead",    100, 0.005f, 10 },
     [ZOMBIE_BUCKETHEAD] = { L"🪣", "Buckethead",  100, 0.004f, 10 },
+    [ZOMBIE_DANCER]     = { L"🕺", "Dancer",      150, 0.006f, 10 },
+    [ZOMBIE_BACKUP]     = { L"👯", "Backup",       80, 0.007f,  8 },
+    [ZOMBIE_POLEVAULTER]= { L"🏌️", "Pole Vaulter",150, 0.008f, 10 },
+    [ZOMBIE_NEWSPAPER]  = { L"📰", "Newspaper",   100, 0.003f, 10 },
+    [ZOMBIE_FOOTBALL]   = { L"🏈", "Football",    200, 0.008f, 12 },
+    [ZOMBIE_SCREENDOOR] = { L"🚪", "Screen Door", 100, 0.004f, 10 },
 };
 
 /* armor HP by type */
@@ -11,6 +17,12 @@ static const int ZOMBIE_ARMOR[ZOMBIE_TYPE_COUNT] = {
     [ZOMBIE_NORMAL]     = 0,
     [ZOMBIE_CONEHEAD]   = 100,
     [ZOMBIE_BUCKETHEAD] = 300,
+    [ZOMBIE_DANCER]     = 0,
+    [ZOMBIE_BACKUP]     = 0,
+    [ZOMBIE_POLEVAULTER]= 0,
+    [ZOMBIE_NEWSPAPER]  = 80,
+    [ZOMBIE_FOOTBALL]   = 200,
+    [ZOMBIE_SCREENDOOR] = 250,
 };
 
 void zombie_init(Zombie *z, ZombieType type, int row) {
@@ -24,6 +36,9 @@ void zombie_init(Zombie *z, ZombieType type, int row) {
     z->alive = 1;
     z->exploding = 0;
     z->armor_hp = ZOMBIE_ARMOR[type];
+    z->summon_timer = (type == ZOMBIE_DANCER) ? 180 : 0;
+    z->has_summoned = 0;
+    z->has_vaulted = 0;
 }
 
 void zombie_take_damage(Zombie *z, int damage) {
@@ -36,8 +51,13 @@ void zombie_take_damage(Zombie *z, int damage) {
             /* armor destroyed — leftover damage hits body */
             int overflow = -z->armor_hp;
             z->armor_hp = 0;
-            z->type = ZOMBIE_NORMAL;  /* downgrade to 🧟 */
             z->hp -= overflow;
+            if (z->type == ZOMBIE_NEWSPAPER) {
+                /* newspaper zombie rages: keep type for 😡 emoji */
+                z->speed = 0.008f;
+            } else {
+                z->type = ZOMBIE_NORMAL;  /* downgrade to 🧟 */
+            }
         }
     } else {
         z->hp -= damage;

@@ -10,6 +10,11 @@ typedef enum {
     PLANT_WALLNUT,
     PLANT_CHERRYBOMB,
     PLANT_SNOWPEA,
+    PLANT_JALAPENO,
+    PLANT_REPEATER,
+    PLANT_CHOMPER,
+    PLANT_POTATOMINE,
+    PLANT_SQUASH,
     PLANT_COUNT
 } PlantType;
 
@@ -20,7 +25,8 @@ typedef struct {
     int col;
     int sun_timer;      /* sunflower: ticks until next sun */
     int shoot_timer;    /* peashooter/snowpea: ticks until next shot */
-    int explode_timer;  /* cherrybomb: ticks until detonation */
+    int explode_timer;  /* cherrybomb/potatomine/squash: ticks until detonation */
+    int chomp_timer;    /* chomper: ticks until digestion finishes */
 } Plant;
 
 typedef struct {

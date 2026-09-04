@@ -11,6 +11,12 @@ typedef enum {
     ZOMBIE_NORMAL = 0,
     ZOMBIE_CONEHEAD,
     ZOMBIE_BUCKETHEAD,
+    ZOMBIE_DANCER,
+    ZOMBIE_BACKUP,
+    ZOMBIE_POLEVAULTER,
+    ZOMBIE_NEWSPAPER,
+    ZOMBIE_FOOTBALL,
+    ZOMBIE_SCREENDOOR,
     ZOMBIE_TYPE_COUNT
 } ZombieType;
 
@@ -25,6 +31,9 @@ typedef struct {
     int alive;
     int exploding;      /* >0: show 💥, counts down to death */
     int armor_hp;       /* headgear hp: cone/bucket, 0 for normal */
+    int summon_timer;   /* dancer: ticks until summon backup dancers */
+    int has_summoned;   /* dancer: 1 if already summoned */
+    int has_vaulted;    /* pole vaulter: 1 after jumping a plant */
 } Zombie;
 
 typedef struct {

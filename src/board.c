@@ -53,10 +53,7 @@ static int row_has_zombie_ahead(const Board *b, int row, int col) {
     return 0;
 }
 
-void board_update(Board *b, int tick, int *sun, int *lives_lost) {
-    *lives_lost = 0;
-
-    /* update plants */
+static void update_plants(Board *b, int tick, int *sun) {
     for (int r = 0; r < BOARD_ROWS; r++) {
         for (int c = 0; c < BOARD_COLS; c++) {
             Plant *p = &b->cells[r][c];
@@ -64,29 +61,31 @@ void board_update(Board *b, int tick, int *sun, int *lives_lost) {
 
             plant_update(p, tick);
 
-            /* sunflower produces sun */
             if (p->type == PLANT_SUNFLOWER && p->sun_timer <= 0) {
                 *sun += 25;
                 p->sun_timer = PLANT_DEFS[PLANT_SUNFLOWER].sun_interval;
             }
 
-            /* shooters fire peas if zombies ahead */
-            if ((p->type == PLANT_PEASHOOTER || p->type == PLANT_SNOWPEA)
+            if ((p->type == PLANT_PEASHOOTER || p->type == PLANT_SNOWPEA
+                 || p->type == PLANT_REPEATER)
                 && p->shoot_timer <= 0
                 && row_has_zombie_ahead(b, r, c)) {
                 ProjType pt = (p->type == PLANT_SNOWPEA) ? PROJ_SNOWPEA : PROJ_PEA;
                 board_add_projectile(b, pt, r, c + 1);
+                if (p->type == PLANT_REPEATER) {
+                    board_add_projectile(b, PROJ_PEA, r, c + 1);
+                    if (b->projectile_count > 0)
+                        b->projectiles[b->projectile_count - 1].x += 0.4f;
+                }
                 p->shoot_timer = PLANT_DEFS[p->type].shoot_interval;
             }
 
-            /* cherry bomb explodes */
             if (p->type == PLANT_CHERRYBOMB && p->explode_timer <= 0) {
                 for (int i = 0; i < b->zombie_count; i++) {
                     Zombie *z = &b->zombies[i];
                     if (!z->alive) continue;
-                    int zc = (int)z->x;
                     if (z->row >= r - 1 && z->row <= r + 1
-                        && zc >= c - 1 && zc <= c + 1) {
+                        && z->x > c - 0.7f && z->x < c + 1.7f) {
                         board_add_vfx(b, VFX_DEATH_BOOM, z->row, z->x, 5);
                         z->alive = 0;
                         z->hp = 0;
@@ -96,30 +95,95 @@ void board_update(Board *b, int tick, int *sun, int *lives_lost) {
                 p->hp = 0;
                 sound_play(SFX_EXPLODE);
             }
+
+            if (p->type == PLANT_JALAPENO && p->explode_timer <= 0) {
+                for (int i = 0; i < b->zombie_count; i++) {
+                    Zombie *z = &b->zombies[i];
+                    if (!z->alive || z->row != r) continue;
+                    board_add_vfx(b, VFX_DEATH_BOOM, z->row, z->x, 5);
+                    z->alive = 0;
+                    z->hp = 0;
+                }
+                p->type = PLANT_NONE;
+                p->hp = 0;
+                sound_play(SFX_EXPLODE);
+            }
+
+            if (p->type == PLANT_CHOMPER && p->chomp_timer <= 0) {
+                for (int i = 0; i < b->zombie_count; i++) {
+                    Zombie *z = &b->zombies[i];
+                    if (!z->alive || z->row != r) continue;
+                    int zc = (int)z->x;
+                    if (zc == c || zc == c + 1) {
+                        board_add_vfx(b, VFX_DEATH_BOOM, z->row, z->x, 5);
+                        z->alive = 0;
+                        z->hp = 0;
+                        p->chomp_timer = 180;
+                        sound_play(SFX_EXPLODE);
+                        break;
+                    }
+                }
+            }
+
+            if (p->type == PLANT_POTATOMINE && p->explode_timer <= 0) {
+                for (int i = 0; i < b->zombie_count; i++) {
+                    Zombie *z = &b->zombies[i];
+                    if (!z->alive || z->row != r) continue;
+                    if ((int)z->x == c) {
+                        board_add_vfx(b, VFX_DEATH_BOOM, z->row, z->x, 5);
+                        z->alive = 0;
+                        z->hp = 0;
+                        p->type = PLANT_NONE;
+                        p->hp = 0;
+                        sound_play(SFX_EXPLODE);
+                        break;
+                    }
+                }
+            }
+
+            if (p->type == PLANT_SQUASH && p->explode_timer <= 0) {
+                float nearest_distance = (float)(BOARD_COLS + 1);
+                int nearest_idx = -1;
+                for (int i = 0; i < b->zombie_count; i++) {
+                    Zombie *z = &b->zombies[i];
+                    if (!z->alive || z->row != r) continue;
+                    float distance = fabsf(z->x - (float)c);
+                    if (distance < nearest_distance) {
+                        nearest_distance = distance;
+                        nearest_idx = i;
+                    }
+                }
+                if (nearest_idx >= 0) {
+                    Zombie *z = &b->zombies[nearest_idx];
+                    board_add_vfx(b, VFX_DEATH_BOOM, z->row, z->x, 5);
+                    z->alive = 0;
+                    z->hp = 0;
+                    p->type = PLANT_NONE;
+                    p->hp = 0;
+                    sound_play(SFX_EXPLODE);
+                }
+            }
         }
     }
+}
 
-    /* update projectiles */
+static void update_projectiles(Board *b) {
     for (int i = 0; i < b->projectile_count; i++) {
         Projectile *pr = &b->projectiles[i];
         if (!pr->alive) continue;
         projectile_update(pr);
 
-        /* off screen */
         if (pr->x > (float)(BOARD_COLS + 1)) {
             pr->alive = 0;
             continue;
         }
 
-        /* collision with zombies */
         for (int j = 0; j < b->zombie_count; j++) {
             Zombie *z = &b->zombies[j];
             if (!z->alive || z->exploding || z->row != pr->row) continue;
             if (fabsf(z->x - pr->x) < 0.5f) {
                 zombie_take_damage(z, pr->damage);
-                if (pr->slow) {
-                    z->speed = ZOMBIE_DEFS[z->type].speed * 0.5f;
-                }
+                if (pr->slow) z->speed = ZOMBIE_DEFS[z->type].speed * 0.3f;
                 board_add_vfx(b, VFX_HIT, z->row, z->x, 3);
                 sound_play(SFX_HIT);
                 if (!z->alive) {
@@ -131,86 +195,114 @@ void board_update(Board *b, int tick, int *sun, int *lives_lost) {
             }
         }
     }
+}
 
-    /* compact dead projectiles */
-    int wp = 0;
-    for (int i = 0; i < b->projectile_count; i++) {
-        if (b->projectiles[i].alive) {
-            if (wp != i) b->projectiles[wp] = b->projectiles[i];
-            wp++;
+static void summon_dancers(Board *b) {
+    int current_count = b->zombie_count;
+    for (int i = 0; i < current_count; i++) {
+        Zombie *z = &b->zombies[i];
+        if (!z->alive || z->type != ZOMBIE_DANCER || z->has_summoned) continue;
+
+        z->summon_timer--;
+        if (z->summon_timer > 0) continue;
+
+        z->has_summoned = 1;
+        int rows[] = { z->row - 1, z->row + 1 };
+        for (int j = 0; j < 2; j++) {
+            int row = rows[j];
+            if (row < 0 || row >= BOARD_ROWS || b->zombie_count >= MAX_ZOMBIES) continue;
+            zombie_init(&b->zombies[b->zombie_count], ZOMBIE_BACKUP, row);
+            b->zombies[b->zombie_count].x = z->x;
+            b->zombie_count++;
         }
     }
-    b->projectile_count = wp;
+}
 
-    /* update zombies */
+static void update_zombies(Board *b, int tick, int *lives_lost) {
     for (int i = 0; i < b->zombie_count; i++) {
         Zombie *z = &b->zombies[i];
         if (!z->alive) continue;
 
-        /* check if eating a plant */
-        int zc = (int)z->x;
+        int col = (int)z->x;
         z->eating = 0;
-        if (zc >= 0 && zc < BOARD_COLS) {
-            Plant *p = &b->cells[z->row][zc];
+        if (col >= 0 && col < BOARD_COLS) {
+            Plant *p = &b->cells[z->row][col];
             if (p->type != PLANT_NONE && p->hp > 0) {
-                z->eating = 1;
-                if (z->eat_timer <= 0) {
-                    z->eat_timer = 10;
+                if (z->type == ZOMBIE_POLEVAULTER && !z->has_vaulted && col > 0) {
+                    z->has_vaulted = 1;
+                    z->x = (float)(col - 1) + 0.5f;
+                    z->speed = 0.005f;
+                    z->type = ZOMBIE_NORMAL;
+                    continue;
                 }
+                z->eating = 1;
+                if (z->eat_timer <= 0) z->eat_timer = 10;
                 z->eat_timer--;
                 if (z->eat_timer <= 0) {
                     p->hp -= ZOMBIE_DEFS[z->type].damage;
                     z->eat_timer = 10;
-                    if (p->hp <= 0) {
-                        p->type = PLANT_NONE;
-                    }
+                    if (p->hp <= 0) p->type = PLANT_NONE;
                 }
             }
         }
 
         zombie_update(z, tick);
+        if (z->x >= 0.0f) continue;
 
-        /* zombie reached the left edge */
-        if (z->x < 0.0f) {
-            /* try lawn mower */
-            LawnMower *m = &b->mowers[z->row];
-            if (m->active && !m->triggered) {
-                m->triggered = 1;
-                sound_play(SFX_MOWER);
-                /* mower kills all zombies in this row */
-                for (int j = 0; j < b->zombie_count; j++) {
-                    if (b->zombies[j].alive && b->zombies[j].row == z->row) {
-                        b->zombies[j].alive = 0;
-                        b->zombies[j].hp = 0;
-                    }
+        LawnMower *mower = &b->mowers[z->row];
+        if (mower->active && !mower->triggered) {
+            mower->triggered = 1;
+            sound_play(SFX_MOWER);
+            for (int j = 0; j < b->zombie_count; j++) {
+                if (b->zombies[j].alive && b->zombies[j].row == z->row) {
+                    b->zombies[j].alive = 0;
+                    b->zombies[j].hp = 0;
                 }
-                m->active = 0;
-            } else {
-                /* no mower — lost a life */
-                z->alive = 0;
-                (*lives_lost)++;
             }
+            mower->active = 0;
+        } else {
+            z->alive = 0;
+            (*lives_lost)++;
         }
     }
+}
 
-    /* update vfx timers */
-    int wv = 0;
-    for (int i = 0; i < b->vfx_count; i++) {
-        b->vfx[i].timer--;
-        if (b->vfx[i].timer > 0) {
-            if (wv != i) b->vfx[wv] = b->vfx[i];
-            wv++;
-        }
+static void update_vfx(Board *b) {
+    for (int i = 0; i < b->vfx_count; i++) b->vfx[i].timer--;
+}
+
+static void compact_entities(Board *b) {
+    int write = 0;
+    for (int i = 0; i < b->projectile_count; i++) {
+        if (!b->projectiles[i].alive) continue;
+        if (write != i) b->projectiles[write] = b->projectiles[i];
+        write++;
     }
-    b->vfx_count = wv;
+    b->projectile_count = write;
 
-    /* compact dead zombies */
-    int wz = 0;
+    write = 0;
     for (int i = 0; i < b->zombie_count; i++) {
-        if (b->zombies[i].alive) {
-            if (wz != i) b->zombies[wz] = b->zombies[i];
-            wz++;
-        }
+        if (!b->zombies[i].alive) continue;
+        if (write != i) b->zombies[write] = b->zombies[i];
+        write++;
     }
-    b->zombie_count = wz;
+    b->zombie_count = write;
+
+    write = 0;
+    for (int i = 0; i < b->vfx_count; i++) {
+        if (b->vfx[i].timer <= 0) continue;
+        if (write != i) b->vfx[write] = b->vfx[i];
+        write++;
+    }
+    b->vfx_count = write;
+}
+
+void board_update(Board *b, int tick, int *sun, int *lives_lost) {
+    *lives_lost = 0;
+    update_plants(b, tick, sun);
+    update_projectiles(b);
+    summon_dancers(b);
+    update_zombies(b, tick, lives_lost);
+    update_vfx(b);
+    compact_entities(b);
 }

@@ -73,7 +73,7 @@ static void gen_noise(int16_t *buf, int n, float vol) {
     for (int i = 0; i < n; i++) {
         float t = (float)i / n;
         float e = (1.0f - t);
-        float val = ((float)rand() / RAND_MAX * 2.0f - 1.0f);
+        float val = ((float)rand() / (float)RAND_MAX * 2.0f - 1.0f);
         buf[i] = (int16_t)(val * vol * e * e * 32767);
     }
 }

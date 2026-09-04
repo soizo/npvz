@@ -53,12 +53,19 @@ static void spawn_random_zombie(Game *g) {
     g->zombies_remaining--;
 }
 
+#define FEEDBACK_DURATION_TICKS 45
+
 /* check if a plant type is already in the deck */
 static int deck_contains(const Game *g, PlantType type) {
     for (int i = 0; i < g->deck_count; i++) {
         if (g->deck[i] == type) return 1;
     }
     return 0;
+}
+
+static void set_feedback(Game *g, GameFeedback feedback) {
+    g->feedback = feedback;
+    g->feedback_ticks = FEEDBACK_DURATION_TICKS;
 }
 
 void game_init(Game *g) {
@@ -80,6 +87,9 @@ void game_init(Game *g) {
     g->max_slots = 6;
     g->deck_count = 0;
     g->card_cursor = 0;
+    g->feedback = FEEDBACK_NONE;
+    g->feedback_ticks = 0;
+    g->help_visible = 0;
 
     for (int i = 0; i < PLANT_COUNT; i++) {
         g->card_cooldowns[i] = 0;
@@ -92,6 +102,8 @@ static void game_enter_card_select(Game *g) {
     g->state = STATE_CARD_SELECT;
     g->deck_count = 0;
     g->card_cursor = 0;
+    g->feedback = FEEDBACK_NONE;
+    g->feedback_ticks = 0;
     for (int i = 0; i < PLANT_COUNT; i++)
         g->deck[i] = PLANT_NONE;
 }
@@ -106,6 +118,9 @@ void game_start_playing(Game *g) {
     g->cursor_col = BOARD_COLS / 2;
     g->selected_plant = PLANT_NONE;
     g->shovel_mode = 0;
+    g->feedback = FEEDBACK_NONE;
+    g->feedback_ticks = 0;
+    g->help_visible = 0;
     g->zombies_remaining = 5 + g->wave * 3;
     g->spawn_timer = 300;
     for (int i = 0; i < PLANT_COUNT; i++) {
@@ -165,11 +180,17 @@ static int handle_card_select_input(Game *g, int ch) {
             }
         } else if (g->deck_count < g->max_slots) {
             g->deck[g->deck_count++] = pt;
+        } else {
+            set_feedback(g, FEEDBACK_DECK_FULL);
         }
         break;
     }
     case 'g': case 'G':
-        if (g->deck_count > 0) game_start_playing(g);
+        if (g->deck_count > 0) {
+            game_start_playing(g);
+        } else {
+            set_feedback(g, FEEDBACK_EMPTY_DECK);
+        }
         break;
     case 'q': case 'Q':
         game_init(g);
@@ -191,6 +212,11 @@ static int handle_end_input(Game *g, int ch) {
 
 static int handle_play_input(Game *g, int ch) {
     if (ch == 'q' || ch == 'Q') return 1;
+    if (ch == '?') {
+        g->help_visible = !g->help_visible;
+        return 0;
+    }
+    if (g->help_visible) return 0;
 
     if (ch == 'p' || ch == 'P') {
         g->state = (g->state == STATE_PAUSED) ? STATE_PLAYING : STATE_PAUSED;
@@ -223,6 +249,7 @@ static int handle_play_input(Game *g, int ch) {
     case '0':
         g->shovel_mode = !g->shovel_mode;
         if (g->shovel_mode) g->selected_plant = PLANT_NONE;
+        set_feedback(g, g->shovel_mode ? FEEDBACK_SHOVEL_ON : FEEDBACK_SHOVEL_OFF);
         break;
     case '\n': case '\r': case ' ':
         if (g->shovel_mode) {
@@ -231,21 +258,33 @@ static int handle_play_input(Game *g, int ch) {
                 p->type = PLANT_NONE;
                 p->hp = 0;
                 sound_play(SFX_SHOVEL);
+                set_feedback(g, FEEDBACK_REMOVED);
             } else {
                 sound_play(SFX_DENY);
+                set_feedback(g, FEEDBACK_NOTHING_TO_REMOVE);
             }
-        } else if (g->selected_plant != PLANT_NONE) {
+        } else if (g->selected_plant == PLANT_NONE) {
+            sound_play(SFX_DENY);
+            set_feedback(g, FEEDBACK_NO_PLANT);
+        } else {
             const PlantDef *def = &PLANT_DEFS[g->selected_plant];
-            if (g->sun >= def->cost
-                && g->card_cooldowns[g->selected_plant] <= 0
-                && g->board.cells[g->cursor_row][g->cursor_col].type == PLANT_NONE) {
+            Plant *p = &g->board.cells[g->cursor_row][g->cursor_col];
+            if (g->sun < def->cost) {
+                sound_play(SFX_DENY);
+                set_feedback(g, FEEDBACK_NEED_SUN);
+            } else if (g->card_cooldowns[g->selected_plant] > 0) {
+                sound_play(SFX_DENY);
+                set_feedback(g, FEEDBACK_COOLDOWN);
+            } else if (p->type != PLANT_NONE) {
+                sound_play(SFX_DENY);
+                set_feedback(g, FEEDBACK_OCCUPIED);
+            } else {
                 board_place_plant(&g->board, g->selected_plant,
                                   g->cursor_row, g->cursor_col);
                 g->sun -= def->cost;
                 g->card_cooldowns[g->selected_plant] = def->cooldown > 0 ? def->cooldown : 30;
                 sound_play(SFX_PLANT);
-            } else {
-                sound_play(SFX_DENY);
+                set_feedback(g, FEEDBACK_PLANTED);
             }
         }
         break;
@@ -270,6 +309,9 @@ int game_handle_input(Game *g, int ch) {
 }
 
 void game_update(Game *g) {
+    if (g->help_visible) return;
+    if (g->feedback_ticks > 0 && --g->feedback_ticks == 0)
+        g->feedback = FEEDBACK_NONE;
     if (g->state != STATE_PLAYING) return;
 
     g->tick++;

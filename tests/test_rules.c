@@ -78,6 +78,91 @@ static void test_placement_contract(void) {
     assert(g.card_cooldowns[PLANT_SUNFLOWER] == 30);
 }
 
+static void test_placement_feedback_contract(void) {
+    Game g;
+
+    game_init(&g);
+    g.state = STATE_PLAYING;
+
+    game_handle_input(&g, ' ');
+    assert(g.feedback == FEEDBACK_NO_PLANT);
+
+    g.selected_plant = PLANT_PEASHOOTER;
+    g.sun = 0;
+    game_handle_input(&g, ' ');
+    assert(g.feedback == FEEDBACK_NEED_SUN);
+
+    g.sun = PLANT_DEFS[PLANT_PEASHOOTER].cost;
+    g.card_cooldowns[PLANT_PEASHOOTER] = 5;
+    game_handle_input(&g, ' ');
+    assert(g.feedback == FEEDBACK_COOLDOWN);
+
+    g.card_cooldowns[PLANT_PEASHOOTER] = 0;
+    plant_init(&g.board.cells[g.cursor_row][g.cursor_col],
+               PLANT_SUNFLOWER, g.cursor_row, g.cursor_col);
+    game_handle_input(&g, ' ');
+    assert(g.feedback == FEEDBACK_OCCUPIED);
+
+    g.board.cells[g.cursor_row][g.cursor_col].type = PLANT_NONE;
+    g.board.cells[g.cursor_row][g.cursor_col].hp = 0;
+    game_handle_input(&g, ' ');
+    assert(g.feedback == FEEDBACK_PLANTED);
+    assert(g.feedback_ticks > 0);
+}
+
+static void test_shovel_and_deck_feedback_contract(void) {
+    Game g;
+
+    game_init(&g);
+    g.state = STATE_PLAYING;
+
+    game_handle_input(&g, '0');
+    assert(g.shovel_mode == 1);
+    assert(g.feedback == FEEDBACK_SHOVEL_ON);
+    game_handle_input(&g, ' ');
+    assert(g.feedback == FEEDBACK_NOTHING_TO_REMOVE);
+
+    plant_init(&g.board.cells[g.cursor_row][g.cursor_col],
+               PLANT_WALLNUT, g.cursor_row, g.cursor_col);
+    game_handle_input(&g, ' ');
+    assert(g.feedback == FEEDBACK_REMOVED);
+
+    game_init(&g);
+    game_handle_input(&g, '\n');
+    game_handle_input(&g, 'g');
+    assert(g.state == STATE_CARD_SELECT);
+    assert(g.feedback == FEEDBACK_EMPTY_DECK);
+
+    g.max_slots = 6;
+    g.deck_count = 6;
+    for (int i = 0; i < 6; i++) g.deck[i] = (PlantType)(i + 1);
+    g.card_cursor = 6;
+    game_handle_input(&g, '\n');
+    assert(g.feedback == FEEDBACK_DECK_FULL);
+}
+
+static void test_help_freezes_and_restores_play(void) {
+    Game g;
+
+    game_init(&g);
+    g.state = STATE_PLAYING;
+    int tick = g.tick;
+    int col = g.cursor_col;
+
+    game_handle_input(&g, '?');
+    assert(g.help_visible == 1);
+    game_update(&g);
+    assert(g.tick == tick);
+
+    game_handle_input(&g, KEY_RIGHT);
+    assert(g.cursor_col == col);
+
+    game_handle_input(&g, '?');
+    assert(g.help_visible == 0);
+    game_update(&g);
+    assert(g.tick == tick + 1);
+}
+
 static void test_mode_completion_contract(void) {
     Game g;
 
@@ -305,6 +390,9 @@ int main(void) {
     test_card_selection_contract();
     test_end_screen_navigation();
     test_placement_contract();
+    test_placement_feedback_contract();
+    test_shovel_and_deck_feedback_contract();
+    test_help_freezes_and_restores_play();
     test_mode_completion_contract();
     test_squash_targets_closest_zombie();
     test_pole_vaulter_jumps_once();

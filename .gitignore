@@ -1,4 +1,5 @@
 npvz
 src/*.o
 .pi/
-docs/superpowers/specs/
+docs/superpowers/
+tests/test_rules

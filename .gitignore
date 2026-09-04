@@ -1,3 +1,4 @@
 npvz
 src/*.o
 .pi/
+docs/superpowers/specs/

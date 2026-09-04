@@ -10,8 +10,9 @@ typedef enum {
     UI_PAIR_INFO,
     UI_PAIR_GRID,
     UI_PAIR_CURSOR,
-    UI_PAIR_HIT,
-    UI_PAIR_DEATH
+    UI_PAIR_CROWD,
+    UI_PAIR_DAMAGE,
+    UI_PAIR_DEATH_FLASH
 } UiColorPair;
 
 typedef struct {

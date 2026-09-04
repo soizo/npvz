@@ -27,13 +27,16 @@ void board_spawn_zombie(Board *b, ZombieType type, int row) {
     b->zombie_count++;
 }
 
-static void board_add_vfx(Board *b, VfxType type, int row, float x, int duration) {
-    if (b->vfx_count >= MAX_VFX) return;
-    Vfx *v = &b->vfx[b->vfx_count++];
-    v->type = type;
-    v->row = row;
-    v->x = x;
-    v->timer = duration;
+static void board_add_effect(Board *b, CombatEffectKind kind,
+                             const Zombie *zombie, int duration) {
+    if (b->effect_count >= MAX_COMBAT_EFFECTS) return;
+    CombatEffect *effect = &b->effects[b->effect_count++];
+    effect->kind = kind;
+    effect->row = zombie->row;
+    effect->x = zombie->x;
+    effect->timer = duration;
+    effect->zombie_type = zombie->type;
+    effect->angry = zombie->type == ZOMBIE_NEWSPAPER && zombie->armor_hp <= 0;
 }
 
 static void board_add_projectile(Board *b, ProjType type, int row, int col) {
@@ -86,7 +89,7 @@ static void update_plants(Board *b, int tick, int *sun) {
                     if (!z->alive) continue;
                     if (z->row >= r - 1 && z->row <= r + 1
                         && z->x > c - 0.7f && z->x < c + 1.7f) {
-                        board_add_vfx(b, VFX_DEATH_BOOM, z->row, z->x, 5);
+                        board_add_effect(b, COMBAT_EFFECT_BLAST, z, 5);
                         z->alive = 0;
                         z->hp = 0;
                     }
@@ -100,7 +103,7 @@ static void update_plants(Board *b, int tick, int *sun) {
                 for (int i = 0; i < b->zombie_count; i++) {
                     Zombie *z = &b->zombies[i];
                     if (!z->alive || z->row != r) continue;
-                    board_add_vfx(b, VFX_DEATH_BOOM, z->row, z->x, 5);
+                    board_add_effect(b, COMBAT_EFFECT_BLAST, z, 5);
                     z->alive = 0;
                     z->hp = 0;
                 }
@@ -115,7 +118,7 @@ static void update_plants(Board *b, int tick, int *sun) {
                     if (!z->alive || z->row != r) continue;
                     int zc = (int)z->x;
                     if (zc == c || zc == c + 1) {
-                        board_add_vfx(b, VFX_DEATH_BOOM, z->row, z->x, 5);
+                        board_add_effect(b, COMBAT_EFFECT_DEATH, z, 5);
                         z->alive = 0;
                         z->hp = 0;
                         p->chomp_timer = 180;
@@ -130,7 +133,7 @@ static void update_plants(Board *b, int tick, int *sun) {
                     Zombie *z = &b->zombies[i];
                     if (!z->alive || z->row != r) continue;
                     if ((int)z->x == c) {
-                        board_add_vfx(b, VFX_DEATH_BOOM, z->row, z->x, 5);
+                        board_add_effect(b, COMBAT_EFFECT_BLAST, z, 5);
                         z->alive = 0;
                         z->hp = 0;
                         p->type = PLANT_NONE;
@@ -155,7 +158,7 @@ static void update_plants(Board *b, int tick, int *sun) {
                 }
                 if (nearest_idx >= 0) {
                     Zombie *z = &b->zombies[nearest_idx];
-                    board_add_vfx(b, VFX_DEATH_BOOM, z->row, z->x, 5);
+                    board_add_effect(b, COMBAT_EFFECT_DEATH, z, 5);
                     z->alive = 0;
                     z->hp = 0;
                     p->type = PLANT_NONE;
@@ -180,14 +183,15 @@ static void update_projectiles(Board *b) {
 
         for (int j = 0; j < b->zombie_count; j++) {
             Zombie *z = &b->zombies[j];
-            if (!z->alive || z->exploding || z->row != pr->row) continue;
+            if (!z->alive || z->row != pr->row) continue;
             if (fabsf(z->x - pr->x) < 0.5f) {
                 zombie_take_damage(z, pr->damage);
                 if (pr->slow) z->speed = ZOMBIE_DEFS[z->type].speed * 0.3f;
-                board_add_vfx(b, VFX_HIT, z->row, z->x, 3);
                 sound_play(SFX_HIT);
-                if (!z->alive) {
-                    board_add_vfx(b, VFX_DEATH_SHOT, z->row, z->x, 5);
+                if (z->alive) {
+                    z->hit_ticks = 3;
+                } else {
+                    board_add_effect(b, COMBAT_EFFECT_DEATH, z, 5);
                     sound_play(SFX_ZOMBIE_DIE);
                 }
                 pr->alive = 0;
@@ -267,8 +271,8 @@ static void update_zombies(Board *b, int tick, int *lives_lost) {
     }
 }
 
-static void update_vfx(Board *b) {
-    for (int i = 0; i < b->vfx_count; i++) b->vfx[i].timer--;
+static void update_effects(Board *b) {
+    for (int i = 0; i < b->effect_count; i++) b->effects[i].timer--;
 }
 
 static void compact_entities(Board *b) {
@@ -289,12 +293,12 @@ static void compact_entities(Board *b) {
     b->zombie_count = write;
 
     write = 0;
-    for (int i = 0; i < b->vfx_count; i++) {
-        if (b->vfx[i].timer <= 0) continue;
-        if (write != i) b->vfx[write] = b->vfx[i];
+    for (int i = 0; i < b->effect_count; i++) {
+        if (b->effects[i].timer <= 0) continue;
+        if (write != i) b->effects[write] = b->effects[i];
         write++;
     }
-    b->vfx_count = write;
+    b->effect_count = write;
 }
 
 void board_update(Board *b, int tick, int *sun, int *lives_lost) {
@@ -303,6 +307,6 @@ void board_update(Board *b, int tick, int *sun, int *lives_lost) {
     update_projectiles(b);
     summon_dancers(b);
     update_zombies(b, tick, lives_lost);
-    update_vfx(b);
+    update_effects(b);
     compact_entities(b);
 }

@@ -1,5 +1,6 @@
 #define _XOPEN_SOURCE_EXTENDED 1
 #include "render.h"
+#include "crowd.h"
 #include "ui.h"
 #include <errno.h>
 #include <locale.h>
@@ -175,14 +176,10 @@ void render_init(void) {
         init_pair(UI_PAIR_INFO, COLOR_CYAN, -1);
         init_pair(UI_PAIR_GRID, COLOR_WHITE, -1);
         init_pair(UI_PAIR_CURSOR, COLOR_BLACK, COLOR_GREEN);
-
-        if (COLORS >= 256) {
-            init_pair(UI_PAIR_HIT, -1, 240);
-            init_pair(UI_PAIR_DEATH, -1, 255);
-        } else {
-            init_pair(UI_PAIR_HIT, -1, COLOR_WHITE);
-            init_pair(UI_PAIR_DEATH, COLOR_BLACK, COLOR_WHITE);
-        }
+        init_pair(UI_PAIR_DAMAGE, COLOR_BLACK, COLOR_MAGENTA);
+        init_pair(UI_PAIR_DEATH_FLASH, COLOR_BLACK, COLOR_WHITE);
+        init_pair(UI_PAIR_CROWD, COLOR_BLACK,
+                  COLORS >= 256 ? 240 : COLOR_WHITE);
     }
 
     calibrate_emoji_widths();
@@ -236,7 +233,8 @@ static int projectile_visible(const Board *b, const Projectile *projectile) {
     return x >= GRID_LEFT;
 }
 
-static void build_board_layout(const Board *b, BoardLayout *layout) {
+static void build_board_layout(const Board *b, const ZombieCrowd *crowds,
+                               int crowd_count, BoardLayout *layout) {
     int delta_at[BOARD_ROWS][BOARD_WIDTH] = {{0}};
 
     for (int row = 0; row < BOARD_ROWS; row++) {
@@ -250,31 +248,20 @@ static void build_board_layout(const Board *b, BoardLayout *layout) {
             delta_at[row][GRID_LEFT + col * CELL_WIDTH] = glyph_delta(glyph, terminal_width);
         }
     }
-    for (int i = 0; i < b->vfx_count; i++) {
-        const Vfx *vfx = &b->vfx[i];
-        int x = GRID_LEFT + (int)(vfx->x * CELL_WIDTH);
-        if (x < 0 || x >= BOARD_WIDTH) continue;
-        if (vfx->type == VFX_DEATH_BOOM) {
-            delta_at[vfx->row][x] = glyph_delta(EXPLOSION_EMOJI, emoji_widths.explosion);
-        } else {
-            delta_at[vfx->row][x] = 0;
-            if (x + 1 < BOARD_WIDTH) delta_at[vfx->row][x + 1] = 0;
-        }
-    }
-    for (int i = 0; i < b->zombie_count; i++) {
-        const Zombie *zombie = &b->zombies[i];
+    for (int i = 0; i < crowd_count; i++) {
+        const Zombie *zombie = &b->zombies[crowds[i].representative];
         int x = GRID_LEFT + (int)(zombie->x * CELL_WIDTH);
-        if (!zombie->alive || x < 0 || x >= BOARD_WIDTH) continue;
+        if (x < GRID_LEFT || x >= BOARD_WIDTH) continue;
         int terminal_width;
         const wchar_t *glyph = zombie_glyph(zombie, &terminal_width);
         delta_at[zombie->row][x] = glyph_delta(glyph, terminal_width);
     }
-    for (int i = 0; i < b->projectile_count; i++) {
-        const Projectile *projectile = &b->projectiles[i];
-        int x = GRID_LEFT + (int)(projectile->x * CELL_WIDTH);
-        if (projectile->alive && projectile_visible(b, projectile)
-            && x >= 0 && x < BOARD_WIDTH)
-            delta_at[projectile->row][x] = 0;
+    for (int i = 0; i < b->effect_count; i++) {
+        const CombatEffect *effect = &b->effects[i];
+        int x = GRID_LEFT + (int)(effect->x * CELL_WIDTH);
+        if (effect->kind == COMBAT_EFFECT_BLAST && x >= 0 && x < BOARD_WIDTH)
+            delta_at[effect->row][x] = glyph_delta(EXPLOSION_EMOJI,
+                                                   emoji_widths.explosion);
     }
 
     for (int row = 0; row < BOARD_ROWS; row++) {
@@ -327,41 +314,32 @@ static void draw_grid(const Board *b, const BoardLayout *layout,
     }
 }
 
-static int zombie_total_hp(const Zombie *zombie) {
-    return zombie->hp + zombie->armor_hp;
-}
-
-static void draw_zombies(const Board *b, const BoardLayout *layout) {
-    int indices[MAX_ZOMBIES];
-    int count = 0;
-
-    for (int i = 0; i < b->zombie_count; i++) {
-        if (b->zombies[i].alive) indices[count++] = i;
-    }
-    for (int i = 1; i < count; i++) {
-        int key = indices[i];
-        int j = i - 1;
-        while (j >= 0
-               && zombie_total_hp(&b->zombies[indices[j]]) > zombie_total_hp(&b->zombies[key])) {
-            indices[j + 1] = indices[j];
-            j--;
-        }
-        indices[j + 1] = key;
-    }
-
-    attron(COLOR_PAIR(UI_PAIR_DANGER));
-    for (int i = 0; i < count; i++) {
-        const Zombie *zombie = &b->zombies[indices[i]];
-        int y = grid_top() + zombie->row * CELL_HEIGHT;
+static void draw_crowds(const Board *b, const ZombieCrowd *crowds,
+                        int crowd_count, const BoardLayout *layout) {
+    for (int i = 0; i < crowd_count; i++) {
+        const ZombieCrowd *crowd = &crowds[i];
+        const Zombie *zombie = &b->zombies[crowd->representative];
         int physical_x = GRID_LEFT + (int)(zombie->x * CELL_WIDTH);
         if (physical_x < GRID_LEFT || physical_x >= BOARD_WIDTH) continue;
 
+        int pair = crowd->hit ? UI_PAIR_DAMAGE
+                 : crowd->count > 1 ? UI_PAIR_CROWD : UI_PAIR_DANGER;
+        int y = grid_top() + zombie->row * CELL_HEIGHT;
+        int x = board_x(layout, zombie->row, physical_x);
         int terminal_width;
         const wchar_t *glyph = zombie_glyph(zombie, &terminal_width);
         (void)terminal_width;
-        mvprintw(y, board_x(layout, zombie->row, physical_x), "%ls", glyph);
+
+        attron(A_BOLD | COLOR_PAIR(pair));
+        mvprintw(y, x, "%ls", glyph);
+        attroff(A_BOLD | COLOR_PAIR(pair));
+        if (crowd->count > 1) {
+            attron(A_DIM);
+            mvaddwstr(y + 1, x, L"×");
+            printw("%d", crowd->count);
+            attroff(A_DIM);
+        }
     }
-    attroff(COLOR_PAIR(UI_PAIR_DANGER));
 }
 
 static void draw_projectiles(const Board *b, const BoardLayout *layout) {
@@ -378,27 +356,39 @@ static void draw_projectiles(const Board *b, const BoardLayout *layout) {
     attroff(COLOR_PAIR(UI_PAIR_INFO));
 }
 
-static void draw_vfx_bg(const Board *b, const BoardLayout *layout) {
-    for (int i = 0; i < b->vfx_count; i++) {
-        const Vfx *vfx = &b->vfx[i];
-        int physical_x = GRID_LEFT + (int)(vfx->x * CELL_WIDTH);
-        int x = board_x(layout, vfx->row, physical_x);
-        int y = grid_top() + vfx->row * CELL_HEIGHT;
+static int effect_zombie_width(const CombatEffect *effect) {
+    int width = effect->angry ? emoji_widths.angry_zombie
+              : emoji_widths.zombies[effect->zombie_type];
+    return width > 0 ? width : 1;
+}
 
-        if (vfx->type == VFX_HIT) {
-            attron(COLOR_PAIR(UI_PAIR_HIT));
-            mvprintw(y, x, "  ");
-            attroff(COLOR_PAIR(UI_PAIR_HIT));
-        } else if (vfx->type == VFX_DEATH_SHOT) {
-            attron(COLOR_PAIR(UI_PAIR_DEATH));
-            mvprintw(y, x, "  ");
-            attroff(COLOR_PAIR(UI_PAIR_DEATH));
-        } else if (vfx->type == VFX_DEATH_BOOM) {
-            attron(COLOR_PAIR(UI_PAIR_DEATH));
-            mvprintw(y, x, "%ls", EXPLOSION_EMOJI);
-            attroff(COLOR_PAIR(UI_PAIR_DEATH));
-        }
+static void draw_death_effects(const Board *b, const BoardLayout *layout) {
+    attron(COLOR_PAIR(UI_PAIR_DEATH_FLASH));
+    for (int i = 0; i < b->effect_count; i++) {
+        const CombatEffect *effect = &b->effects[i];
+        if (effect->kind != COMBAT_EFFECT_DEATH) continue;
+        int physical_x = GRID_LEFT + (int)(effect->x * CELL_WIDTH);
+        if (physical_x < GRID_LEFT || physical_x >= BOARD_WIDTH) continue;
+        int x = board_x(layout, effect->row, physical_x);
+        int y = grid_top() + effect->row * CELL_HEIGHT;
+        move(y, x);
+        for (int col = 0; col < effect_zombie_width(effect); col++) addch(' ');
     }
+    attroff(COLOR_PAIR(UI_PAIR_DEATH_FLASH));
+}
+
+static void draw_blast_effects(const Board *b, const BoardLayout *layout) {
+    attron(COLOR_PAIR(UI_PAIR_DEATH_FLASH));
+    for (int i = 0; i < b->effect_count; i++) {
+        const CombatEffect *effect = &b->effects[i];
+        if (effect->kind != COMBAT_EFFECT_BLAST) continue;
+        int physical_x = GRID_LEFT + (int)(effect->x * CELL_WIDTH);
+        if (physical_x < GRID_LEFT || physical_x >= BOARD_WIDTH) continue;
+        int x = board_x(layout, effect->row, physical_x);
+        int y = grid_top() + effect->row * CELL_HEIGHT;
+        mvprintw(y, x, "%ls", EXPLOSION_EMOJI);
+    }
+    attroff(COLOR_PAIR(UI_PAIR_DEATH_FLASH));
 }
 
 static void draw_menu(const Game *g) {
@@ -542,13 +532,18 @@ void render_frame(const Game *g) {
         return;
     }
 
+    ZombieCrowd crowds[MAX_ZOMBIES];
+    int crowd_count = crowd_build(g->board.zombies, g->board.zombie_count,
+                                  emoji_widths.zombies, emoji_widths.angry_zombie,
+                                  CELL_WIDTH, crowds);
     BoardLayout layout;
-    build_board_layout(&g->board, &layout);
+    build_board_layout(&g->board, crowds, crowd_count, &layout);
     ui_draw_hud(g, 0);
     draw_grid(&g->board, &layout, g->cursor_row, g->cursor_col);
-    draw_vfx_bg(&g->board, &layout);
-    draw_zombies(&g->board, &layout);
+    draw_death_effects(&g->board, &layout);
+    draw_crowds(&g->board, crowds, crowd_count, &layout);
     draw_projectiles(&g->board, &layout);
+    draw_blast_effects(&g->board, &layout);
     ui_draw_game_footer(g, grid_bottom());
 
     int overlay_center = (grid_top() + grid_bottom() - 1) / 2;

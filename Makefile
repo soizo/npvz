@@ -21,7 +21,7 @@ OBJ     := $(SRC:.c=.o)
 HDR     := $(wildcard src/*.h)
 BIN     := npvz
 TEST_BIN := tests/test_rules
-TEST_SRC := tests/test_rules.c tests/sound_stub.c src/game.c src/board.c src/plant.c src/zombie.c src/projectile.c
+TEST_SRC := tests/test_rules.c tests/sound_stub.c src/game.c src/board.c src/crowd.c src/plant.c src/zombie.c src/projectile.c
 
 all: $(BIN)
 

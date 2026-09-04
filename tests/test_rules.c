@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "../src/game.h"
+#include "../src/crowd.h"
 
 static void test_exit_is_not_a_loss_state(void) {
     Game g;
@@ -207,6 +208,8 @@ static void test_squash_targets_closest_zombie(void) {
 
     assert(b.zombie_count == 1);
     assert(b.zombies[0].x == 1.0f);
+    assert(b.effect_count == 1);
+    assert(b.effects[0].kind == COMBAT_EFFECT_DEATH);
 }
 
 static void test_pole_vaulter_jumps_once(void) {
@@ -308,14 +311,15 @@ static void test_entity_capacity_is_bounded(void) {
     assert(b.projectile_count == MAX_PROJECTILES);
 
     board_init(&b);
-    for (int i = 0; i < MAX_VFX; i++) b.vfx[i].timer = 2;
-    b.vfx_count = MAX_VFX;
+    for (int i = 0; i < MAX_COMBAT_EFFECTS; i++) b.effects[i].timer = 2;
+    b.effect_count = MAX_COMBAT_EFFECTS;
     projectile_init(&b.projectiles[0], PROJ_PEA, 0, 4);
     b.projectiles[0].speed = 0.0f;
     b.projectile_count = 1;
     spawn_stationary(&b, ZOMBIE_NORMAL, 0, 4.0f);
+    b.zombies[0].hp = 1;
     board_update(&b, 1, &sun, &lost);
-    assert(b.vfx_count == MAX_VFX);
+    assert(b.effect_count == MAX_COMBAT_EFFECTS);
 }
 
 static void test_jalapeno_only_clears_its_row(void) {
@@ -331,6 +335,8 @@ static void test_jalapeno_only_clears_its_row(void) {
     board_update(&b, 1, &sun, &lost);
     assert(b.zombie_count == 1);
     assert(b.zombies[0].row == 1);
+    assert(b.effect_count == 1);
+    assert(b.effects[0].kind == COMBAT_EFFECT_BLAST);
 }
 
 static void test_chomper_eats_one_then_digests(void) {
@@ -360,6 +366,8 @@ static void test_potato_mine_requires_arming(void) {
     b.cells[2][4].explode_timer = 0;
     board_update(&b, 2, &sun, &lost);
     assert(b.zombie_count == 0);
+    assert(b.effect_count == 1);
+    assert(b.effects[0].kind == COMBAT_EFFECT_BLAST);
 }
 
 static void test_armor_break_rules(void) {
@@ -385,6 +393,123 @@ static void test_armor_break_rules(void) {
     assert(z.hp == 100);
 }
 
+static void fire_stationary_projectile(Board *b, int row, int col) {
+    projectile_init(&b->projectiles[0], PROJ_PEA, row, col);
+    b->projectiles[0].speed = 0.0f;
+    b->projectile_count = 1;
+}
+
+static void test_projectile_hit_and_death_effects_are_exclusive(void) {
+    Board b;
+    int sun = 0;
+    int lost = 0;
+
+    board_init(&b);
+    spawn_stationary(&b, ZOMBIE_NORMAL, 0, 4.0f);
+    fire_stationary_projectile(&b, 0, 4);
+    board_update(&b, 1, &sun, &lost);
+    assert(b.zombie_count == 1);
+    assert(b.zombies[0].hit_ticks > 0);
+    assert(b.effect_count == 0);
+
+    board_init(&b);
+    spawn_stationary(&b, ZOMBIE_NORMAL, 0, 4.0f);
+    b.zombies[0].hp = 1;
+    fire_stationary_projectile(&b, 0, 4);
+    board_update(&b, 1, &sun, &lost);
+    assert(b.zombie_count == 0);
+    assert(b.effect_count == 1);
+    assert(b.effects[0].kind == COMBAT_EFFECT_DEATH);
+}
+
+static void test_kill_effects_match_attack_type(void) {
+    Board b;
+    int sun = 0;
+    int lost = 0;
+
+    board_init(&b);
+    board_place_plant(&b, PLANT_CHERRYBOMB, 2, 4);
+    b.cells[2][4].explode_timer = 0;
+    spawn_stationary(&b, ZOMBIE_NORMAL, 2, 4.0f);
+    board_update(&b, 1, &sun, &lost);
+    assert(b.effect_count == 1);
+    assert(b.effects[0].kind == COMBAT_EFFECT_BLAST);
+
+    board_init(&b);
+    board_place_plant(&b, PLANT_CHOMPER, 2, 4);
+    spawn_stationary(&b, ZOMBIE_NORMAL, 2, 5.0f);
+    board_update(&b, 1, &sun, &lost);
+    assert(b.effect_count == 1);
+    assert(b.effects[0].kind == COMBAT_EFFECT_DEATH);
+
+    for (int tick = 2; tick <= 5; tick++)
+        board_update(&b, tick, &sun, &lost);
+    assert(b.effect_count == 0);
+}
+
+static void fill_zombie_widths(int widths[ZOMBIE_TYPE_COUNT]) {
+    for (int i = 0; i < ZOMBIE_TYPE_COUNT; i++) widths[i] = 2;
+}
+
+static void test_crowd_groups_same_cell_and_half_overlaps(void) {
+    Zombie zombies[4];
+    ZombieCrowd groups[MAX_ZOMBIES];
+    int widths[ZOMBIE_TYPE_COUNT];
+    fill_zombie_widths(widths);
+
+    zombie_init(&zombies[0], ZOMBIE_NORMAL, 0);
+    zombies[0].x = 4.0f;
+    zombie_init(&zombies[1], ZOMBIE_CONEHEAD, 0);
+    zombies[1].x = 4.5f;
+    zombie_init(&zombies[2], ZOMBIE_FOOTBALL, 0);
+    zombies[2].x = 4.75f;
+    zombie_init(&zombies[3], ZOMBIE_NORMAL, 0);
+    zombies[3].x = 5.0f;
+    zombies[1].hit_ticks = 2;
+
+    int count = crowd_build(zombies, 4, widths, 2, 4, groups);
+    assert(count == 1);
+    assert(groups[0].count == 4);
+    assert(groups[0].representative == 2);
+    assert(groups[0].hit == 1);
+}
+
+static void test_crowd_representative_priority(void) {
+    Zombie zombies[3];
+    ZombieCrowd groups[MAX_ZOMBIES];
+    int widths[ZOMBIE_TYPE_COUNT];
+    fill_zombie_widths(widths);
+
+    zombie_init(&zombies[0], ZOMBIE_NORMAL, 0);
+    zombie_init(&zombies[1], ZOMBIE_BUCKETHEAD, 0);
+    zombie_init(&zombies[2], ZOMBIE_DANCER, 0);
+    for (int i = 0; i < 3; i++) zombies[i].x = 4.0f;
+    zombies[0].hp = 1000;
+    zombies[1].hp = 500;
+    zombies[1].armor_hp = 500;
+    zombies[2].hp = 1;
+    assert(crowd_build(zombies, 3, widths, 2, 4, groups) == 1);
+    assert(groups[0].representative == 2);
+
+    zombie_init(&zombies[0], ZOMBIE_BACKUP, 0);
+    zombie_init(&zombies[1], ZOMBIE_SCREENDOOR, 0);
+    zombies[0].x = zombies[1].x = 4.0f;
+    zombies[0].hp = 500;
+    zombies[1].hp = 100;
+    zombies[1].armor_hp = 0;
+    assert(crowd_build(zombies, 2, widths, 2, 4, groups) == 1);
+    assert(groups[0].representative == 0);
+
+    zombie_init(&zombies[0], ZOMBIE_DANCER, 0);
+    zombie_init(&zombies[1], ZOMBIE_FOOTBALL, 0);
+    zombies[0].x = 3.75f;
+    zombies[1].x = 4.0f;
+    zombies[0].hp = zombies[1].hp = 100;
+    zombies[0].armor_hp = zombies[1].armor_hp = 0;
+    assert(crowd_build(zombies, 2, widths, 2, 4, groups) == 1);
+    assert(groups[0].representative == 0);
+}
+
 int main(void) {
     test_exit_is_not_a_loss_state();
     test_card_selection_contract();
@@ -405,6 +530,10 @@ int main(void) {
     test_chomper_eats_one_then_digests();
     test_potato_mine_requires_arming();
     test_armor_break_rules();
+    test_projectile_hit_and_death_effects_are_exclusive();
+    test_kill_effects_match_attack_type();
+    test_crowd_groups_same_cell_and_half_overlaps();
+    test_crowd_representative_priority();
     puts("rule tests passed");
     return 0;
 }

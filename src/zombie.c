@@ -34,7 +34,7 @@ void zombie_init(Zombie *z, ZombieType type, int row) {
     z->eating = 0;
     z->eat_timer = 0;
     z->alive = 1;
-    z->exploding = 0;
+    z->hit_ticks = 0;
     z->armor_hp = ZOMBIE_ARMOR[type];
     z->summon_timer = (type == ZOMBIE_DANCER) ? 180 : 0;
     z->has_summoned = 0;
@@ -72,6 +72,7 @@ void zombie_update(Zombie *z, int tick) {
     (void)tick;
     if (!z->alive) return;
 
+    if (z->hit_ticks > 0) z->hit_ticks--;
     if (!z->eating) {
         z->x -= z->speed;
     }

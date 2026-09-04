@@ -2,7 +2,7 @@
 
 Plants vs. Zombies in your terminal — ncurses-based, emoji-rendered, chiptune-powered.
 
-![NPVZonGhostty](./docs/screenshots/NPVZonGhostty.png)
+![NPVZ terminal gameplay](./docs/screenshots/NPVZonGhostty.png)
 
 ## Features
 
@@ -31,6 +31,7 @@ Plants vs. Zombies in your terminal — ncurses-based, emoji-rendered, chiptune-
 | Game | 0 | Toggle shovel |
 | Game | Enter / Space | Place plant or dig |
 | Game | P | Pause / unpause |
+| Game | ? | Open / close command help |
 | End screen | R | Return to card selection |
 | End screen | M | Return to menu |
 | Any screen except card selection | Q | Quit |

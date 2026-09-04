@@ -3,6 +3,8 @@
 #include <string.h>
 #include <math.h>
 
+#define PLANT_FLASH_TICKS 3
+
 void board_init(Board *b) {
     memset(b, 0, sizeof(Board));
     for (int r = 0; r < BOARD_ROWS; r++) {
@@ -45,6 +47,10 @@ static void board_add_projectile(Board *b, ProjType type, int row, int col) {
     b->projectile_count++;
 }
 
+static void flash_plant(Board *b, int row, int col) {
+    b->plant_flash_ticks[row][col] = PLANT_FLASH_TICKS;
+}
+
 /* check if any zombie is in the given row at or beyond the given column */
 static int row_has_zombie_ahead(const Board *b, int row, int col) {
     for (int i = 0; i < b->zombie_count; i++) {
@@ -67,6 +73,7 @@ static void update_plants(Board *b, int tick, int *sun) {
             if (p->type == PLANT_SUNFLOWER && p->sun_timer <= 0) {
                 *sun += 25;
                 p->sun_timer = PLANT_DEFS[PLANT_SUNFLOWER].sun_interval;
+                flash_plant(b, r, c);
             }
 
             if ((p->type == PLANT_PEASHOOTER || p->type == PLANT_SNOWPEA
@@ -81,6 +88,7 @@ static void update_plants(Board *b, int tick, int *sun) {
                         b->projectiles[b->projectile_count - 1].x += 0.4f;
                 }
                 p->shoot_timer = PLANT_DEFS[p->type].shoot_interval;
+                flash_plant(b, r, c);
             }
 
             if (p->type == PLANT_CHERRYBOMB && p->explode_timer <= 0) {
@@ -94,6 +102,7 @@ static void update_plants(Board *b, int tick, int *sun) {
                         z->hp = 0;
                     }
                 }
+                flash_plant(b, r, c);
                 p->type = PLANT_NONE;
                 p->hp = 0;
                 sound_play(SFX_EXPLODE);
@@ -107,6 +116,7 @@ static void update_plants(Board *b, int tick, int *sun) {
                     z->alive = 0;
                     z->hp = 0;
                 }
+                flash_plant(b, r, c);
                 p->type = PLANT_NONE;
                 p->hp = 0;
                 sound_play(SFX_EXPLODE);
@@ -122,6 +132,7 @@ static void update_plants(Board *b, int tick, int *sun) {
                         z->alive = 0;
                         z->hp = 0;
                         p->chomp_timer = 180;
+                        flash_plant(b, r, c);
                         sound_play(SFX_EXPLODE);
                         break;
                     }
@@ -136,6 +147,7 @@ static void update_plants(Board *b, int tick, int *sun) {
                         board_add_effect(b, COMBAT_EFFECT_BLAST, z, 5);
                         z->alive = 0;
                         z->hp = 0;
+                        flash_plant(b, r, c);
                         p->type = PLANT_NONE;
                         p->hp = 0;
                         sound_play(SFX_EXPLODE);
@@ -161,6 +173,7 @@ static void update_plants(Board *b, int tick, int *sun) {
                     board_add_effect(b, COMBAT_EFFECT_DEATH, z, 5);
                     z->alive = 0;
                     z->hp = 0;
+                    flash_plant(b, r, c);
                     p->type = PLANT_NONE;
                     p->hp = 0;
                     sound_play(SFX_EXPLODE);
@@ -245,6 +258,7 @@ static void update_zombies(Board *b, int tick, int *lives_lost) {
                 if (z->eat_timer <= 0) {
                     p->hp -= ZOMBIE_DEFS[z->type].damage;
                     z->eat_timer = 10;
+                    sound_play(SFX_BITE);
                     if (p->hp <= 0) p->type = PLANT_NONE;
                 }
             }
@@ -273,6 +287,10 @@ static void update_zombies(Board *b, int tick, int *lives_lost) {
 
 static void update_effects(Board *b) {
     for (int i = 0; i < b->effect_count; i++) b->effects[i].timer--;
+    for (int row = 0; row < BOARD_ROWS; row++)
+        for (int col = 0; col < BOARD_COLS; col++)
+            if (b->plant_flash_ticks[row][col] > 0)
+                b->plant_flash_ticks[row][col]--;
 }
 
 static void compact_entities(Board *b) {

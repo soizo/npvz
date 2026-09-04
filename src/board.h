@@ -41,6 +41,7 @@ typedef struct {
     LawnMower mowers[BOARD_ROWS];
     CombatEffect effects[MAX_COMBAT_EFFECTS];
     int effect_count;
+    int plant_flash_ticks[BOARD_ROWS][BOARD_COLS];
 } Board;
 
 /* display characters */

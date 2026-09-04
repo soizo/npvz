@@ -4,6 +4,10 @@
 
 #include "../src/game.h"
 #include "../src/crowd.h"
+#include "../src/sound.h"
+
+void sound_test_reset(void);
+int sound_test_count(SfxType type);
 
 static void test_exit_is_not_a_loss_state(void) {
     Game g;
@@ -210,6 +214,7 @@ static void test_squash_targets_closest_zombie(void) {
     assert(b.zombies[0].x == 1.0f);
     assert(b.effect_count == 1);
     assert(b.effects[0].kind == COMBAT_EFFECT_DEATH);
+    assert(b.plant_flash_ticks[2][4] > 0);
 }
 
 static void test_pole_vaulter_jumps_once(void) {
@@ -243,6 +248,48 @@ static void test_repeater_fires_two_projectiles(void) {
     board_update(&b, 1, &sun, &lost);
 
     assert(b.projectile_count == 2);
+    assert(b.plant_flash_ticks[0][0] > 0);
+}
+
+static void test_sunflower_and_snowpea_actions_flash(void) {
+    Board b;
+    int sun = 0;
+    int lost = 0;
+
+    board_init(&b);
+    board_place_plant(&b, PLANT_SUNFLOWER, 0, 0);
+    b.cells[0][0].sun_timer = 0;
+    board_place_plant(&b, PLANT_SNOWPEA, 1, 1);
+    b.cells[1][1].shoot_timer = 0;
+    spawn_stationary(&b, ZOMBIE_NORMAL, 1, 8.0f);
+    board_update(&b, 1, &sun, &lost);
+
+    assert(sun == 25);
+    assert(b.plant_flash_ticks[0][0] > 0);
+    assert(b.plant_flash_ticks[1][1] > 0);
+    for (int tick = 2; tick <= 10; tick++) board_update(&b, tick, &sun, &lost);
+    assert(b.plant_flash_ticks[0][0] == 0);
+    assert(b.plant_flash_ticks[1][1] == 0);
+}
+
+static void test_each_zombie_bite_plays_crunch(void) {
+    Board b;
+    int sun = 0;
+    int lost = 0;
+
+    board_init(&b);
+    board_place_plant(&b, PLANT_WALLNUT, 2, 3);
+    spawn_stationary(&b, ZOMBIE_NORMAL, 2, 3.0f);
+    b.zombies[0].eat_timer = 1;
+    sound_test_reset();
+
+    board_update(&b, 1, &sun, &lost);
+    assert(sound_test_count(SFX_BITE) == 1);
+    board_update(&b, 2, &sun, &lost);
+    assert(sound_test_count(SFX_BITE) == 1);
+    b.zombies[0].eat_timer = 1;
+    board_update(&b, 3, &sun, &lost);
+    assert(sound_test_count(SFX_BITE) == 2);
 }
 
 static void test_dancer_summons_once(void) {
@@ -337,6 +384,7 @@ static void test_jalapeno_only_clears_its_row(void) {
     assert(b.zombies[0].row == 1);
     assert(b.effect_count == 1);
     assert(b.effects[0].kind == COMBAT_EFFECT_BLAST);
+    assert(b.plant_flash_ticks[2][4] > 0);
 }
 
 static void test_chomper_eats_one_then_digests(void) {
@@ -350,6 +398,7 @@ static void test_chomper_eats_one_then_digests(void) {
     board_update(&b, 1, &sun, &lost);
     assert(b.zombie_count == 0);
     assert(b.cells[2][4].chomp_timer == 180);
+    assert(b.plant_flash_ticks[2][4] > 0);
 }
 
 static void test_potato_mine_requires_arming(void) {
@@ -368,6 +417,7 @@ static void test_potato_mine_requires_arming(void) {
     assert(b.zombie_count == 0);
     assert(b.effect_count == 1);
     assert(b.effects[0].kind == COMBAT_EFFECT_BLAST);
+    assert(b.plant_flash_ticks[2][4] > 0);
 }
 
 static void test_armor_break_rules(void) {
@@ -434,6 +484,7 @@ static void test_kill_effects_match_attack_type(void) {
     board_update(&b, 1, &sun, &lost);
     assert(b.effect_count == 1);
     assert(b.effects[0].kind == COMBAT_EFFECT_BLAST);
+    assert(b.plant_flash_ticks[2][4] > 0);
 
     board_init(&b);
     board_place_plant(&b, PLANT_CHOMPER, 2, 4);
@@ -441,6 +492,7 @@ static void test_kill_effects_match_attack_type(void) {
     board_update(&b, 1, &sun, &lost);
     assert(b.effect_count == 1);
     assert(b.effects[0].kind == COMBAT_EFFECT_DEATH);
+    assert(b.plant_flash_ticks[2][4] > 0);
 
     for (int tick = 2; tick <= 5; tick++)
         board_update(&b, tick, &sun, &lost);
@@ -522,6 +574,8 @@ int main(void) {
     test_squash_targets_closest_zombie();
     test_pole_vaulter_jumps_once();
     test_repeater_fires_two_projectiles();
+    test_sunflower_and_snowpea_actions_flash();
+    test_each_zombie_bite_plays_crunch();
     test_dancer_summons_once();
     test_mower_stops_a_breach();
     test_breach_without_mower_loses();

@@ -12,7 +12,8 @@ typedef enum {
     UI_PAIR_CURSOR,
     UI_PAIR_CROWD,
     UI_PAIR_DAMAGE,
-    UI_PAIR_DEATH_FLASH
+    UI_PAIR_DEATH_FLASH,
+    UI_PAIR_ACTION_FLASH
 } UiColorPair;
 
 typedef struct {

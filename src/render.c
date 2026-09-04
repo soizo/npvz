@@ -178,6 +178,7 @@ void render_init(void) {
         init_pair(UI_PAIR_CURSOR, COLOR_BLACK, COLOR_GREEN);
         init_pair(UI_PAIR_DAMAGE, COLOR_BLACK, COLOR_MAGENTA);
         init_pair(UI_PAIR_DEATH_FLASH, COLOR_BLACK, COLOR_WHITE);
+        init_pair(UI_PAIR_ACTION_FLASH, COLOR_WHITE, COLOR_BLACK);
         init_pair(UI_PAIR_CROWD, COLOR_BLACK,
                   COLORS >= 256 ? 240 : COLOR_WHITE);
     }
@@ -299,17 +300,22 @@ static void draw_grid(const Board *b, const BoardLayout *layout,
             int x = board_x(layout, row, GRID_LEFT + col * CELL_WIDTH);
             const Plant *plant = &b->cells[row][col];
             int selected = row == cursor_row && col == cursor_col;
+            int flashing = b->plant_flash_ticks[row][col] > 0;
+            int attrs = flashing ? COLOR_PAIR(UI_PAIR_ACTION_FLASH)
+                      : selected ? COLOR_PAIR(UI_PAIR_CURSOR) | A_BOLD : 0;
 
-            if (selected) attron(COLOR_PAIR(UI_PAIR_CURSOR) | A_BOLD);
+            if (attrs) attron(attrs);
+            if (flashing && (plant->type == PLANT_NONE || plant->hp <= 0))
+                mvhline(y, x, ' ', 2);
             if (plant->type != PLANT_NONE && plant->hp > 0) {
                 int terminal_width;
                 const wchar_t *glyph = plant_glyph(plant, &terminal_width);
                 (void)terminal_width;
                 mvprintw(y, x, "%ls", glyph);
-            } else {
+            } else if (!flashing) {
                 mvprintw(y, x, "%ls", selected ? L"◆" : L"·");
             }
-            if (selected) attroff(COLOR_PAIR(UI_PAIR_CURSOR) | A_BOLD);
+            if (attrs) attroff(attrs);
         }
     }
 }

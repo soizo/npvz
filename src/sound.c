@@ -137,6 +137,11 @@ void sound_init(void) {
     gen_chirp(buf, n, 350, 300, 0.20f, 1);
     write_wav(sfx_paths[SFX_HIT], buf, n);
 
+    /* SFX_BITE: short dry noise crunch, 45ms */
+    n = (int)(0.045f * SR);
+    gen_noise(buf, n, 0.28f);
+    write_wav(sfx_paths[SFX_BITE], buf, n);
+
     /* SFX_ZOMBIE_DIE: descending square 600→100Hz, 120ms */
     n = (int)(0.12f * SR);
     gen_chirp(buf, n, 600, 100, 0.25f, 1);

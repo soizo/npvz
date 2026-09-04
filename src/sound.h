@@ -6,6 +6,7 @@ typedef enum {
     SFX_SHOVEL,       /* dig: falling square */
     SFX_DENY,         /* can't place: low buzz */
     SFX_HIT,          /* zombie hit: short blip */
+    SFX_BITE,         /* plant bitten: crisp crunch */
     SFX_ZOMBIE_DIE,   /* zombie killed: descending square */
     SFX_EXPLODE,      /* cherry bomb: noise + rumble */
     SFX_MOWER,        /* lawn mower: sawtooth buzz */

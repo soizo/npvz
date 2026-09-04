@@ -6,26 +6,35 @@ Plants vs. Zombies in your terminal — ncurses-based, emoji-rendered, chiptune-
 
 ## Features
 
-- **5×9 grid**, 5 waves of zombies
-- **Plants:** 🌻 🫛 🪨 🍒 🧊 with sun economy
-- **Zombies:** 🧟 🪖 🪣 — Conehead and Buckethead have separate armor HP before you can damage the body
+- **5×9 grid** with five-wave level and endless modes
+- **Card selection:** choose 6–9 plants before each game
+- **Plants:** Sunflower, Peashooter, Wall-nut, Cherry Bomb, Snow Pea, Jalapeno, Repeater, Chomper, Potato Mine, and Squash
+- **Zombies:** Normal, Conehead, Buckethead, Dancer, Backup, Pole Vaulter, Newspaper, Football, and Screen Door
 - **Lawn mowers** 🚜 as last-resort row defense
-- **Shovel** 🪏 to remove placed plants
+- **Shovel** ⛏ to remove placed plants
 - **Projectiles** rendered as `·` (middle dot)
-- **VFX:** hit flash, death flash, 💥 cherry bomb explosion
-- **Chiptune SFX** synthesized at launch — sine, square, sawtooth, noise waveforms played via `afplay`
+- **VFX:** hit flash, death flash, and explosions
+- **Chiptune SFX** synthesized at launch and played via `afplay`
 
 ## Controls
 
-| Key                      | Action               |
-| ------------------------ | -------------------- |
-| Arrow keys / WASD / HJKL | Move cursor          |
-| 1–5                      | Select plant         |
-| 0                        | Toggle shovel        |
-| Enter / Space            | Place plant or dig   |
-| P                        | Pause / unpause      |
-| Q                        | Quit                 |
-| R                        | Restart (end screen) |
+| Screen | Key | Action |
+| --- | --- | --- |
+| Menu | Up/Down or W/S/J/K | Choose level or endless mode |
+| Menu | Enter / Space | Open card selection |
+| Card selection | Up/Down or W/S/J/K | Choose a plant |
+| Card selection | Left/Right or A/D/H/L | Set 6–9 card slots |
+| Card selection | Enter / Space | Add or remove a plant |
+| Card selection | G | Start with the selected deck |
+| Game | Arrow keys / WASD / HJKL | Move cursor |
+| Game | 1–9 | Select a deck slot |
+| Game | 0 | Toggle shovel |
+| Game | Enter / Space | Place plant or dig |
+| Game | P | Pause / unpause |
+| End screen | R | Return to card selection |
+| End screen | M | Return to menu |
+| Any screen except card selection | Q | Quit |
+| Card selection | Q | Return to menu |
 
 ## Build
 

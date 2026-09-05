@@ -21,6 +21,10 @@ int main(void) {
 
     InputState input;
     input_init(&input);
+    assert(ungetch('\n') == OK);
+    push_wheel(BUTTON4_PRESSED);
+    input_init(&input);
+    assert(input_read(&input, 0) == ERR);
 
     push_wheel(BUTTON4_PRESSED);
     assert(input_read(&input, 0) == KEY_UP);

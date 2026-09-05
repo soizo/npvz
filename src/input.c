@@ -8,6 +8,7 @@ void input_init(InputState *input) {
     input->next_wheel_ms = 0;
     mousemask(BUTTON4_PRESSED | BUTTON5_PRESSED, NULL);
     mouseinterval(0);
+    flushinp();
 }
 
 int input_read(InputState *input, int64_t now_ms) {

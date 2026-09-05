@@ -7,11 +7,11 @@ Set TypingSpeed 10ms
 
 Type "TERM=xterm-256color ./npvz"
 Enter
+Sleep 2s
+Enter
 Sleep 1s
 Enter
-Sleep 500ms
-Enter
-Sleep 500ms
+Sleep 1s
 Type "g"
 Sleep 500ms
 Type "1"

@@ -361,6 +361,30 @@ static OverlayLayout draw_overlay_shell(int center_y, int height, int width,
     return layout;
 }
 
+static int overlay_center_x(const OverlayLayout *overlay, const char *text) {
+    return overlay->content_left
+         + (overlay->content_width - (int)strlen(text)) / 2;
+}
+
+static void draw_overlay_items(const OverlayLayout *overlay, int row,
+                               const char *items[], int count, int selected) {
+    int x = overlay->content_left + (overlay->content_width - 12) / 2;
+    for (int i = 0; i < count; i++) {
+        if (selected == i) attron(A_REVERSE | A_BOLD);
+        mvprintw(overlay->top + row + i, x, "%c %-10s",
+                 selected == i ? '>' : ' ', items[i]);
+        if (selected == i) attroff(A_REVERSE | A_BOLD);
+    }
+}
+
+static void draw_overlay_footer(const OverlayLayout *overlay, int height,
+                                const char *footer) {
+    attron(COLOR_PAIR(UI_PAIR_INFO));
+    mvprintw(overlay->top + height - 2, overlay_center_x(overlay, footer),
+             "%s", footer);
+    attroff(COLOR_PAIR(UI_PAIR_INFO));
+}
+
 void ui_draw_help(const Game *g, int center_y) {
     (void)g;
     OverlayLayout overlay = draw_overlay_shell(
@@ -383,21 +407,10 @@ void ui_draw_pause(const Game *g, int center_y) {
     int width = art_rows > 0 ? 62 : 40;
     OverlayLayout overlay = draw_overlay_shell(
         center_y, height, width, "PAUSED", UI_PAIR_INFO, 2, art_rows);
-    int top = overlay.top;
-    int left = overlay.left;
-    int item_x = art_rows > 0 ? left + 34 : left + 14;
-    int footer_x = art_rows > 0 ? left + 27 : left + 4;
     static const char *items[] = { "RESUME", "HELP", "MENU" };
-    for (int i = 0; i < 3; i++) {
-        if (g->menu_selection == i) attron(A_REVERSE | A_BOLD);
-        mvprintw(top + 4 + i, item_x, "%c %-10s",
-                 g->menu_selection == i ? '>' : ' ', items[i]);
-        if (g->menu_selection == i) attroff(A_REVERSE | A_BOLD);
-    }
-    attron(COLOR_PAIR(UI_PAIR_INFO));
-    mvprintw(top + height - 2, footer_x,
-             "SELECT//J K ENTER  RESUME//P ESC");
-    attroff(COLOR_PAIR(UI_PAIR_INFO));
+    draw_overlay_items(&overlay, 4, items, 3, g->menu_selection);
+    draw_overlay_footer(&overlay, height,
+                        "SELECT//J K ENTER  RESUME//P ESC");
 }
 
 void ui_draw_endscreen(const Game *g, int center_y) {
@@ -406,17 +419,10 @@ void ui_draw_endscreen(const Game *g, int center_y) {
     const char *title = g->state == STATE_WON ? "LEVEL CLEAR" : "LAWN OVERRUN";
     OverlayLayout overlay = draw_overlay_shell(
         center_y, 8, 40, title, pair, 1, 0);
-    int top = overlay.top;
-    int left = overlay.left;
     static const char *items[] = { "RESELECT", "MENU" };
-    mvprintw(top + 2, left + 16, "WAVE %d", display_wave);
-    for (int i = 0; i < 2; i++) {
-        if (g->menu_selection == i) attron(A_REVERSE | A_BOLD);
-        mvprintw(top + 4 + i, left + 12, "%c %-10s",
-                 g->menu_selection == i ? '>' : ' ', items[i]);
-        if (g->menu_selection == i) attroff(A_REVERSE | A_BOLD);
-    }
-    attron(COLOR_PAIR(UI_PAIR_INFO));
-    mvprintw(top + 6, left + 8, "MOVE//J K  CHOOSE//ENTER");
-    attroff(COLOR_PAIR(UI_PAIR_INFO));
+    char wave[16];
+    snprintf(wave, sizeof(wave), "WAVE %d", display_wave);
+    mvprintw(overlay.top + 2, overlay_center_x(&overlay, wave), "%s", wave);
+    draw_overlay_items(&overlay, 4, items, 2, g->menu_selection);
+    draw_overlay_footer(&overlay, 8, "MOVE//J K  CHOOSE//ENTER");
 }

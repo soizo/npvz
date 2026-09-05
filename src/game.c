@@ -87,6 +87,7 @@ void game_init(Game *g) {
     g->max_slots = 6;
     g->deck_count = 0;
     g->card_cursor = 0;
+    g->card_focus = 0;
     g->feedback = FEEDBACK_NONE;
     g->feedback_ticks = 0;
     g->help_visible = 0;
@@ -102,6 +103,7 @@ static void game_enter_card_select(Game *g) {
     g->state = STATE_CARD_SELECT;
     g->deck_count = 0;
     g->card_cursor = 0;
+    g->card_focus = 0;
     g->feedback = FEEDBACK_NONE;
     g->feedback_ticks = 0;
     for (int i = 0; i < PLANT_COUNT; i++)
@@ -130,18 +132,17 @@ void game_start_playing(Game *g) {
 
 static int handle_menu_input(Game *g, int ch) {
     switch (ch) {
-    case KEY_UP: case 'w': case 'k':
+    case KEY_UP: case 'k':
         if (g->menu_selection > 0) g->menu_selection--;
         break;
-    case KEY_DOWN: case 's': case 'j':
-        if (g->menu_selection < 1) g->menu_selection++;
+    case KEY_DOWN: case 'j':
+        if (g->menu_selection < 2) g->menu_selection++;
         break;
-    case '\n': case '\r': case ' ':
+    case '\n': case '\r':
+        if (g->menu_selection == 2) return 1;
         g->mode = (g->menu_selection == 0) ? MODE_LEVEL : MODE_ENDLESS;
         game_enter_card_select(g);
         break;
-    case 'q': case 'Q':
-        return 1;
     }
     return 0;
 }
@@ -149,21 +150,45 @@ static int handle_menu_input(Game *g, int ch) {
 static int handle_card_select_input(Game *g, int ch) {
     int plant_count = PLANT_COUNT - 1;
 
+    if (ch == 'g' || ch == 'G') {
+        if (g->deck_count > 0) game_start_playing(g);
+        else set_feedback(g, FEEDBACK_EMPTY_DECK);
+        return 0;
+    }
+    if (ch == 'q' || ch == 'Q' || ch == 27) {
+        game_init(g);
+        return 0;
+    }
+    if (ch == '\t') {
+        g->card_focus = (g->card_focus + 1) % 3;
+        return 0;
+    }
+    if (g->card_focus == 1 && (ch == '\n' || ch == '\r')) {
+        if (g->deck_count > 0) game_start_playing(g);
+        else set_feedback(g, FEEDBACK_EMPTY_DECK);
+        return 0;
+    }
+    if (g->card_focus == 2 && (ch == '\n' || ch == '\r')) {
+        game_init(g);
+        return 0;
+    }
+    if (g->card_focus != 0) return 0;
+
     switch (ch) {
-    case KEY_UP: case 'w': case 'k':
+    case KEY_UP: case 'k':
         if (g->card_cursor > 0) g->card_cursor--;
         break;
-    case KEY_DOWN: case 's': case 'j':
+    case KEY_DOWN: case 'j':
         if (g->card_cursor < plant_count - 1) g->card_cursor++;
         break;
-    case KEY_LEFT: case 'a': case 'h':
+    case KEY_LEFT: case 'h':
         if (g->max_slots > 6) {
             g->max_slots--;
             while (g->deck_count > g->max_slots)
                 g->deck[--g->deck_count] = PLANT_NONE;
         }
         break;
-    case KEY_RIGHT: case 'd': case 'l':
+    case KEY_RIGHT: case 'l':
         if (g->max_slots < 9) g->max_slots++;
         break;
     case '\n': case '\r': case ' ': {
@@ -185,68 +210,78 @@ static int handle_card_select_input(Game *g, int ch) {
         }
         break;
     }
-    case 'g': case 'G':
-        if (g->deck_count > 0) {
-            game_start_playing(g);
-        } else {
-            set_feedback(g, FEEDBACK_EMPTY_DECK);
-        }
-        break;
-    case 'q': case 'Q':
-        game_init(g);
-        break;
     }
     return 0;
 }
 
 static int handle_end_input(Game *g, int ch) {
-    if (ch == 'q' || ch == 'Q') {
-        return 1;
-    } else if (ch == 'r' || ch == 'R') {
-        game_enter_card_select(g);
-    } else if (ch == 'm' || ch == 'M') {
-        game_init(g);
+    if ((ch == KEY_UP || ch == 'k') && g->menu_selection > 0)
+        g->menu_selection--;
+    else if ((ch == KEY_DOWN || ch == 'j') && g->menu_selection < 1)
+        g->menu_selection++;
+    else if (ch == '\n' || ch == '\r') {
+        if (g->menu_selection == 0) game_enter_card_select(g);
+        else game_init(g);
     }
     return 0;
 }
 
 static int handle_play_input(Game *g, int ch) {
-    if (ch == 'q' || ch == 'Q') return 1;
-    if (ch == '?') {
-        g->help_visible = !g->help_visible;
+    if (g->help_visible) {
+        if (ch == 'p' || ch == 'P' || ch == 27) g->help_visible = 0;
         return 0;
     }
-    if (g->help_visible) return 0;
-
-    if (ch == 'p' || ch == 'P') {
-        g->state = (g->state == STATE_PAUSED) ? STATE_PLAYING : STATE_PAUSED;
+    if (g->state == STATE_PAUSED) {
+        if (ch == 'p' || ch == 'P' || ch == 27) {
+            g->state = STATE_PLAYING;
+            return 0;
+        }
+        if ((ch == KEY_UP || ch == 'k') && g->menu_selection > 0)
+            g->menu_selection--;
+        else if ((ch == KEY_DOWN || ch == 'j') && g->menu_selection < 2)
+            g->menu_selection++;
+        else if (ch == '\n' || ch == '\r') {
+            if (g->menu_selection == 0) g->state = STATE_PLAYING;
+            else if (g->menu_selection == 1) g->help_visible = 1;
+            else game_init(g);
+        }
         return 0;
     }
-    if (g->state == STATE_PAUSED) return 0;
+    if (ch == 'p' || ch == 'P' || ch == 27) {
+        g->state = STATE_PAUSED;
+        g->menu_selection = 0;
+        return 0;
+    }
 
+    int deck_index = ch >= '1' && ch <= '9' ? ch - '1' : -1;
     switch (ch) {
-    case KEY_UP: case 'w': case 'k':
-        if (g->cursor_row > 0) g->cursor_row--;
-        break;
-    case KEY_DOWN: case 's': case 'j':
-        if (g->cursor_row < BOARD_ROWS - 1) g->cursor_row++;
-        break;
-    case KEY_LEFT: case 'a': case 'h':
-        if (g->cursor_col > 0) g->cursor_col--;
-        break;
-    case KEY_RIGHT: case 'd': case 'l':
-        if (g->cursor_col < BOARD_COLS - 1) g->cursor_col++;
-        break;
-    case '1': case '2': case '3': case '4': case '5':
-    case '6': case '7': case '8': case '9': {
-        int idx = ch - '1';
-        if (idx < g->deck_count) {
-            g->selected_plant = g->deck[idx];
+    case 'q': case 'Q': deck_index = 5; break;
+    case 'w': case 'W': deck_index = 6; break;
+    case 'e': case 'E': deck_index = 7; break;
+    case 'r': case 'R': deck_index = 8; break;
+    }
+    if (deck_index >= 0) {
+        if (deck_index < g->deck_count) {
+            g->selected_plant = g->deck[deck_index];
             g->shovel_mode = 0;
         }
-        break;
+        return 0;
     }
-    case '0':
+
+    switch (ch) {
+    case KEY_UP: case 'k':
+        g->cursor_row = (g->cursor_row + BOARD_ROWS - 1) % BOARD_ROWS;
+        break;
+    case KEY_DOWN: case 'j': case '\t':
+        g->cursor_row = (g->cursor_row + 1) % BOARD_ROWS;
+        break;
+    case KEY_LEFT: case 'h':
+        g->cursor_col = (g->cursor_col + BOARD_COLS - 1) % BOARD_COLS;
+        break;
+    case KEY_RIGHT: case 'l':
+        g->cursor_col = (g->cursor_col + 1) % BOARD_COLS;
+        break;
+    case '0': case 't': case 'T':
         g->shovel_mode = !g->shovel_mode;
         if (g->shovel_mode) g->selected_plant = PLANT_NONE;
         set_feedback(g, g->shovel_mode ? FEEDBACK_SHOVEL_ON : FEEDBACK_SHOVEL_OFF);
@@ -341,6 +376,7 @@ void game_update(Game *g) {
 
     if (lives_lost > 0) {
         g->state = STATE_LOST;
+        g->menu_selection = 0;
         sound_play(SFX_GAME_OVER);
         return;
     }
@@ -351,6 +387,7 @@ void game_update(Game *g) {
 
         if (g->mode == MODE_LEVEL && g->wave > 5) {
             g->state = STATE_WON;
+            g->menu_selection = 0;
             sound_play(SFX_WIN);
         } else {
             /* next wave — endless never ends */

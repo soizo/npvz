@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <ncurses.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
 
@@ -10,8 +11,50 @@
 #define DECK_TAB_WIDTH 13
 #define RULE_WIDTH 75
 #define UI_SUN L"☀\uFE0E"
+#define PAUSE_ART_ROWS 11
+#define PAUSE_ART_COLS 32
+#define PAUSE_ART_WIDTH 21
+
+#ifndef NPVZ_DATA_DIR
+#define NPVZ_DATA_DIR "/usr/local/share/npvz"
+#endif
 
 static EmojiWidths emoji_widths;
+static wchar_t pause_art[PAUSE_ART_ROWS][PAUSE_ART_COLS];
+static int pause_art_loaded;
+static int pause_art_rows;
+
+static int load_pause_art(void) {
+    if (pause_art_loaded) return pause_art_rows;
+    pause_art_loaded = 1;
+
+    const char *paths[] = {
+        "asciiart/newspaper-zombie.txt",
+        NPVZ_DATA_DIR "/asciiart/newspaper-zombie.txt"
+    };
+    FILE *file = NULL;
+    for (int i = 0; i < 2 && file == NULL; i++) file = fopen(paths[i], "r");
+    if (file == NULL) return 0;
+
+    char line[PAUSE_ART_COLS];
+    while (pause_art_rows < PAUSE_ART_ROWS && fgets(line, sizeof(line), file)) {
+        line[strcspn(line, "\r\n")] = '\0';
+        char *start = line;
+        while (*start == ' ' || *start == '\t') start++;
+        char *end = start + strlen(start);
+        while (end > start && (end[-1] == ' ' || end[-1] == '\t')) end--;
+        *end = '\0';
+        if (*start == '\0' || strncmp(start, "auth:", 5) == 0) continue;
+
+        size_t length = mbstowcs(pause_art[pause_art_rows], start,
+                                 PAUSE_ART_COLS - 1);
+        if (length == (size_t)-1) continue;
+        pause_art[pause_art_rows][length] = L'\0';
+        pause_art_rows++;
+    }
+    fclose(file);
+    return pause_art_rows;
+}
 
 void ui_set_emoji_widths(const EmojiWidths *widths, int table_enabled) {
     emoji_widths = *widths;
@@ -122,6 +165,8 @@ static void draw_deck(const Game *g, int start_y) {
     draw_deck_row(g, 0, start_y + 2);
     if (g->deck_count + 1 > CARDS_PER_ROW)
         draw_deck_row(g, 1, start_y + 3);
+    /* Width compensation needs both rows repainted from column zero. */
+    wredrawln(stdscr, start_y + 2, 2);
     draw_deck_rule(start_y + 4, 0);
 }
 
@@ -249,7 +294,7 @@ void ui_draw_game_footer(const Game *g, int start_y) {
     ui_draw_feedback(g, start_y + 2);
     attron(COLOR_PAIR(UI_PAIR_INFO));
     mvprintw(start_y + 3, 0,
-             "MOVE//WASD  DEPLOY//ENTER  HELP//?  PAUSE//P  QUIT//Q");
+             "MOVE//HJKL TAB  SELECT//1-9 QWERT  DEPLOY//ENTER  PAUSE//P ESC");
     attroff(COLOR_PAIR(UI_PAIR_INFO));
 }
 
@@ -278,34 +323,62 @@ void ui_draw_help(const Game *g, int center_y) {
     int rows, cols;
     getmaxyx(stdscr, rows, cols);
     (void)rows;
-    int top = center_y - 5;
-    int left = (cols - 44) / 2;
+    int top = center_y - 6;
+    int left = (cols - 50) / 2;
 
-    draw_box(top, left, 11, 44);
+    draw_box(top, left, 12, 50);
     attron(A_BOLD | COLOR_PAIR(UI_PAIR_INFO));
-    mvprintw(top + 1, left + 15, "COMMAND HELP");
+    mvprintw(top + 1, left + 18, "COMMAND HELP");
     attroff(A_BOLD | COLOR_PAIR(UI_PAIR_INFO));
-    mvprintw(top + 2, left + 3, "MOVE        ARROWS / WASD / HJKL");
-    mvprintw(top + 3, left + 3, "SELECT      1-9");
-    mvprintw(top + 4, left + 3, "SHOVEL      0");
-    mvprintw(top + 5, left + 3, "PLACE / DIG ENTER / SPACE");
-    mvprintw(top + 6, left + 3, "PAUSE       P");
-    mvprintw(top + 7, left + 3, "CLOSE HELP  ?");
-    mvprintw(top + 8, left + 3, "QUIT        Q");
+    mvprintw(top + 2, left + 3, "MOVE        ARROWS / HJKL (WRAPS)");
+    mvprintw(top + 3, left + 3, "NEXT ROW    TAB (WRAPS)");
+    mvprintw(top + 4, left + 3, "SELECT      1-9");
+    mvprintw(top + 5, left + 3, "ALT KEYS    Q W E R T = 6 7 8 9 0");
+    mvprintw(top + 6, left + 3, "SHOVEL      0 / T");
+    mvprintw(top + 7, left + 3, "PLACE / DIG ENTER / SPACE");
+    mvprintw(top + 8, left + 3, "PAUSE       P / ESC");
+    mvprintw(top + 9, left + 3, "BACK        P / ESC");
 }
 
-void ui_draw_pause(int center_y) {
+void ui_draw_pause(const Game *g, int center_y) {
     int rows, cols;
     getmaxyx(stdscr, rows, cols);
     (void)rows;
-    int top = center_y - 2;
-    int left = (cols - 34) / 2;
+    int art_rows = load_pause_art();
+    int height = art_rows > 0 ? 13 : 9;
+    int width = art_rows > 0 ? 62 : 40;
+    int top = center_y - height / 2;
+    int left = (cols - width) / 2;
+    int title_x = art_rows > 0 ? left + 40 : left + 17;
+    int item_x = art_rows > 0 ? left + 34 : left + 14;
+    int footer_x = art_rows > 0 ? left + 27 : left + 4;
+    static const char *items[] = { "RESUME", "HELP", "MENU" };
 
-    draw_box(top, left, 5, 34);
+    draw_box(top, left, height, width);
+    if (art_rows > 0) {
+        for (int i = 0; i < art_rows; i++) {
+            int display_width = wcswidth(pause_art[i], PAUSE_ART_COLS);
+            if (display_width < 0)
+                display_width = (int)wcslen(pause_art[i]);
+            mvaddwstr(top + 1 + i,
+                      left + 2 + (PAUSE_ART_WIDTH - display_width) / 2,
+                      pause_art[i]);
+        }
+        for (int y = 1; y < height - 1; y++) mvaddch(top + y, left + 24, '|');
+    }
     attron(A_BOLD | COLOR_PAIR(UI_PAIR_INFO));
-    mvprintw(top + 1, left + 14, "PAUSED");
+    mvprintw(top + 2, title_x, "PAUSED");
     attroff(A_BOLD | COLOR_PAIR(UI_PAIR_INFO));
-    mvprintw(top + 3, left + 4, "CONTINUE//P   QUIT//Q");
+    for (int i = 0; i < 3; i++) {
+        if (g->menu_selection == i) attron(A_REVERSE | A_BOLD);
+        mvprintw(top + 4 + i, item_x, "%c %-10s",
+                 g->menu_selection == i ? '>' : ' ', items[i]);
+        if (g->menu_selection == i) attroff(A_REVERSE | A_BOLD);
+    }
+    attron(COLOR_PAIR(UI_PAIR_INFO));
+    mvprintw(top + height - 2, footer_x,
+             "SELECT//J K ENTER  RESUME//P ESC");
+    attroff(COLOR_PAIR(UI_PAIR_INFO));
 }
 
 void ui_draw_endscreen(const Game *g, int center_y) {
@@ -313,15 +386,24 @@ void ui_draw_endscreen(const Game *g, int center_y) {
     int display_wave = g->mode == MODE_LEVEL && g->wave > 5 ? 5 : g->wave;
     getmaxyx(stdscr, rows, cols);
     (void)rows;
-    int top = center_y - 3;
-    int left = (cols - 46) / 2;
+    int top = center_y - 4;
+    int left = (cols - 40) / 2;
     int pair = g->state == STATE_WON ? UI_PAIR_READY : UI_PAIR_DANGER;
+    static const char *items[] = { "RESELECT", "MENU" };
 
-    draw_box(top, left, 7, 46);
+    draw_box(top, left, 8, 40);
     attron(A_BOLD | COLOR_PAIR(pair));
-    mvprintw(top + 1, left + (g->state == STATE_WON ? 17 : 15),
+    mvprintw(top + 1, left + (g->state == STATE_WON ? 14 : 12),
              "%s", g->state == STATE_WON ? "LEVEL CLEAR" : "LAWN OVERRUN");
     attroff(A_BOLD | COLOR_PAIR(pair));
-    mvprintw(top + 2, left + 19, "WAVE %d", display_wave);
-    mvprintw(top + 4, left + 5, "RESELECT//R   MENU//M   QUIT//Q");
+    mvprintw(top + 2, left + 16, "WAVE %d", display_wave);
+    for (int i = 0; i < 2; i++) {
+        if (g->menu_selection == i) attron(A_REVERSE | A_BOLD);
+        mvprintw(top + 4 + i, left + 12, "%c %-10s",
+                 g->menu_selection == i ? '>' : ' ', items[i]);
+        if (g->menu_selection == i) attroff(A_REVERSE | A_BOLD);
+    }
+    attron(COLOR_PAIR(UI_PAIR_INFO));
+    mvprintw(top + 6, left + 8, "MOVE//J K  CHOOSE//ENTER");
+    attroff(COLOR_PAIR(UI_PAIR_INFO));
 }

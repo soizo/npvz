@@ -35,7 +35,7 @@ typedef enum {
 typedef struct {
     GameState state;
     GameMode mode;
-    int menu_selection;         /* 0 = level, 1 = endless */
+    int menu_selection;         /* selected item on the active menu */
     Board board;
     int sun;
     int level;
@@ -54,6 +54,7 @@ typedef struct {
     PlantType deck[PLANT_COUNT]; /* selected plants for this game */
     int deck_count;             /* how many plants in deck */
     int card_cursor;            /* cursor in card selection screen */
+    int card_focus;             /* 0 = plants, 1 = start, 2 = menu */
 
     /* transient interface state */
     GameFeedback feedback;

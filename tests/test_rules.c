@@ -9,24 +9,27 @@
 void sound_test_reset(void);
 int sound_test_count(SfxType type);
 
-static void test_exit_is_not_a_loss_state(void) {
+static void test_quit_only_from_main_menu(void) {
     Game g;
 
     game_init(&g);
-    assert(game_handle_input(&g, 'q') == 1);
+    assert(game_handle_input(&g, 'q') == 0);
     assert(g.state == STATE_MENU);
+    game_handle_input(&g, KEY_DOWN);
+    game_handle_input(&g, KEY_DOWN);
+    assert(game_handle_input(&g, '\n') == 1);
 
     game_init(&g);
     game_handle_input(&g, '\n');
     assert(game_handle_input(&g, 'q') == 0);
     assert(g.state == STATE_MENU);
 
-    g.state = STATE_PLAYING;
-    assert(game_handle_input(&g, 'Q') == 1);
     g.state = STATE_PAUSED;
-    assert(game_handle_input(&g, 'q') == 1);
+    assert(game_handle_input(&g, 'q') == 0);
+    assert(g.state == STATE_PAUSED);
     g.state = STATE_WON;
-    assert(game_handle_input(&g, 'q') == 1);
+    assert(game_handle_input(&g, 'q') == 0);
+    assert(g.state == STATE_WON);
 }
 
 static void test_card_selection_contract(void) {
@@ -36,23 +39,55 @@ static void test_card_selection_contract(void) {
     game_handle_input(&g, '\n');
     assert(g.state == STATE_CARD_SELECT);
 
-    for (int i = 0; i < 12; i++) game_handle_input(&g, KEY_RIGHT);
+    game_handle_input(&g, 'w');
+    assert(g.card_cursor == 0);
+    for (int i = 0; i < 12; i++) game_handle_input(&g, 'l');
     assert(g.max_slots == 9);
-    for (int i = 0; i < 12; i++) game_handle_input(&g, KEY_LEFT);
+    for (int i = 0; i < 12; i++) game_handle_input(&g, 'h');
     assert(g.max_slots == 6);
 
-    game_handle_input(&g, '\n');
-    assert(g.deck_count == 1);
-    game_handle_input(&g, '\n');
-    assert(g.deck_count == 0);
     game_handle_input(&g, 'g');
     assert(g.state == STATE_CARD_SELECT);
-
+    assert(g.feedback == FEEDBACK_EMPTY_DECK);
     game_handle_input(&g, '\n');
+    assert(g.deck_count == 1);
     game_handle_input(&g, 'g');
     assert(g.state == STATE_PLAYING);
     assert(g.sun == 50);
     assert(g.wave == 1);
+
+    game_init(&g);
+    game_handle_input(&g, '\n');
+    game_handle_input(&g, 'q');
+    assert(g.state == STATE_MENU);
+
+    game_init(&g);
+    game_handle_input(&g, '\n');
+    game_handle_input(&g, 27);
+    assert(g.state == STATE_MENU);
+
+    game_init(&g);
+    game_handle_input(&g, '\n');
+    game_handle_input(&g, '\t');
+    assert(g.card_focus == 1);
+    game_handle_input(&g, '\n');
+    assert(g.state == STATE_CARD_SELECT);
+    assert(g.feedback == FEEDBACK_EMPTY_DECK);
+
+    game_init(&g);
+    game_handle_input(&g, '\n');
+    game_handle_input(&g, '\n');
+    game_handle_input(&g, '\t');
+    game_handle_input(&g, '\n');
+    assert(g.state == STATE_PLAYING);
+
+    game_init(&g);
+    game_handle_input(&g, '\n');
+    game_handle_input(&g, '\t');
+    game_handle_input(&g, '\t');
+    assert(g.card_focus == 2);
+    game_handle_input(&g, '\n');
+    assert(g.state == STATE_MENU);
 }
 
 static void test_end_screen_navigation(void) {
@@ -61,10 +96,14 @@ static void test_end_screen_navigation(void) {
     game_init(&g);
     g.state = STATE_WON;
     game_handle_input(&g, 'r');
+    assert(g.state == STATE_WON);
+    game_handle_input(&g, '\n');
     assert(g.state == STATE_CARD_SELECT);
 
+    game_init(&g);
     g.state = STATE_LOST;
-    game_handle_input(&g, 'm');
+    game_handle_input(&g, KEY_DOWN);
+    game_handle_input(&g, '\n');
     assert(g.state == STATE_MENU);
 }
 
@@ -134,7 +173,8 @@ static void test_shovel_and_deck_feedback_contract(void) {
 
     game_init(&g);
     game_handle_input(&g, '\n');
-    game_handle_input(&g, 'g');
+    game_handle_input(&g, '\t');
+    game_handle_input(&g, '\n');
     assert(g.state == STATE_CARD_SELECT);
     assert(g.feedback == FEEDBACK_EMPTY_DECK);
 
@@ -142,11 +182,12 @@ static void test_shovel_and_deck_feedback_contract(void) {
     g.deck_count = 6;
     for (int i = 0; i < 6; i++) g.deck[i] = (PlantType)(i + 1);
     g.card_cursor = 6;
+    g.card_focus = 0;
     game_handle_input(&g, '\n');
     assert(g.feedback == FEEDBACK_DECK_FULL);
 }
 
-static void test_help_freezes_and_restores_play(void) {
+static void test_pause_menu_and_help_freeze_play(void) {
     Game g;
 
     game_init(&g);
@@ -155,17 +196,98 @@ static void test_help_freezes_and_restores_play(void) {
     int col = g.cursor_col;
 
     game_handle_input(&g, '?');
-    assert(g.help_visible == 1);
+    assert(g.help_visible == 0);
+    assert(g.state == STATE_PLAYING);
+    game_handle_input(&g, 27);
+    assert(g.state == STATE_PAUSED);
+    assert(g.menu_selection == 0);
     game_update(&g);
     assert(g.tick == tick);
 
+    game_handle_input(&g, KEY_DOWN);
+    game_handle_input(&g, '\n');
+    assert(g.help_visible == 1);
     game_handle_input(&g, KEY_RIGHT);
     assert(g.cursor_col == col);
 
-    game_handle_input(&g, '?');
+    game_handle_input(&g, 'P');
     assert(g.help_visible == 0);
+    assert(g.state == STATE_PAUSED);
+    game_handle_input(&g, 27);
+    assert(g.state == STATE_PLAYING);
     game_update(&g);
     assert(g.tick == tick + 1);
+
+    game_handle_input(&g, 'p');
+    assert(g.state == STATE_PAUSED);
+    game_handle_input(&g, 'p');
+    assert(g.state == STATE_PLAYING);
+    game_handle_input(&g, 'p');
+    game_handle_input(&g, KEY_DOWN);
+    game_handle_input(&g, KEY_DOWN);
+    game_handle_input(&g, '\n');
+    assert(g.state == STATE_MENU);
+}
+
+static void test_gameplay_key_map(void) {
+    Game g;
+
+    game_init(&g);
+    g.state = STATE_PLAYING;
+    g.deck_count = 9;
+    for (int i = 0; i < 9; i++) g.deck[i] = (PlantType)(i + 1);
+    int row = g.cursor_row;
+    int col = g.cursor_col;
+
+    game_handle_input(&g, 'a');
+    game_handle_input(&g, 's');
+    game_handle_input(&g, 'd');
+    assert(g.cursor_row == row);
+    assert(g.cursor_col == col);
+    game_handle_input(&g, 'k');
+    game_handle_input(&g, 'h');
+    assert(g.cursor_row == row - 1);
+    assert(g.cursor_col == col - 1);
+    game_handle_input(&g, 'j');
+    game_handle_input(&g, 'l');
+    assert(g.cursor_row == row);
+    assert(g.cursor_col == col);
+
+    g.cursor_row = 0;
+    g.cursor_col = 0;
+    game_handle_input(&g, 'k');
+    game_handle_input(&g, 'h');
+    assert(g.cursor_row == BOARD_ROWS - 1);
+    assert(g.cursor_col == BOARD_COLS - 1);
+    game_handle_input(&g, 'j');
+    game_handle_input(&g, 'l');
+    assert(g.cursor_row == 0);
+    assert(g.cursor_col == 0);
+    game_handle_input(&g, KEY_UP);
+    game_handle_input(&g, KEY_LEFT);
+    assert(g.cursor_row == BOARD_ROWS - 1);
+    assert(g.cursor_col == BOARD_COLS - 1);
+    game_handle_input(&g, KEY_DOWN);
+    game_handle_input(&g, KEY_RIGHT);
+    assert(g.cursor_row == 0);
+    assert(g.cursor_col == 0);
+
+    g.cursor_row = BOARD_ROWS - 1;
+    g.cursor_col = 3;
+    game_handle_input(&g, '\t');
+    assert(g.cursor_row == 0);
+    assert(g.cursor_col == 3);
+
+    game_handle_input(&g, 'q');
+    assert(g.selected_plant == g.deck[5]);
+    game_handle_input(&g, 'w');
+    assert(g.selected_plant == g.deck[6]);
+    game_handle_input(&g, 'e');
+    assert(g.selected_plant == g.deck[7]);
+    game_handle_input(&g, 'r');
+    assert(g.selected_plant == g.deck[8]);
+    game_handle_input(&g, 't');
+    assert(g.shovel_mode == 1);
 }
 
 static void test_mode_completion_contract(void) {
@@ -563,13 +685,14 @@ static void test_crowd_representative_priority(void) {
 }
 
 int main(void) {
-    test_exit_is_not_a_loss_state();
+    test_quit_only_from_main_menu();
     test_card_selection_contract();
     test_end_screen_navigation();
     test_placement_contract();
     test_placement_feedback_contract();
     test_shovel_and_deck_feedback_contract();
-    test_help_freezes_and_restores_play();
+    test_pause_menu_and_help_freeze_play();
+    test_gameplay_key_map();
     test_mode_completion_contract();
     test_squash_targets_closest_zombie();
     test_pole_vaulter_jumps_once();

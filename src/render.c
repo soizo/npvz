@@ -166,6 +166,7 @@ void render_init(void) {
     noecho();
     curs_set(0);
     keypad(stdscr, TRUE);
+    set_escdelay(25);
 
     if (has_colors()) {
         start_color();
@@ -411,14 +412,17 @@ static void draw_menu(const Game *g) {
     mvprintw(top + 4, left, "      |_|              ");
     attroff(A_BOLD | COLOR_PAIR(UI_PAIR_READY));
 
-    static const char *labels[] = { "LEVEL//5 WAVES", "ENDLESS//NO LIMIT" };
+    static const char *labels[] = {
+        "LEVEL//5 WAVES", "ENDLESS//NO LIMIT", "QUIT"
+    };
     static const char *descriptions[] = {
         "Clear five waves to win.",
-        "Survive accelerating waves."
+        "Survive accelerating waves.",
+        "Exit NPVZ."
     };
 
-    for (int i = 0; i < 2; i++) {
-        int y = top + 7 + i * 3;
+    for (int i = 0; i < 3; i++) {
+        int y = top + 6 + i * 2;
         if (i == g->menu_selection) attron(A_REVERSE | A_BOLD);
         mvprintw(y, cols / 2 - 12, "%c %-20s",
                  i == g->menu_selection ? '>' : ' ', labels[i]);
@@ -429,8 +433,8 @@ static void draw_menu(const Game *g) {
     }
 
     attron(COLOR_PAIR(UI_PAIR_INFO));
-    mvprintw(top + 13, cols / 2 - 21,
-             "MOVE//UP DOWN  START//ENTER  QUIT//Q");
+    mvprintw(top + 13, cols / 2 - 18,
+             "MOVE//UP DOWN J K  CHOOSE//ENTER");
     attroff(COLOR_PAIR(UI_PAIR_INFO));
 }
 
@@ -473,7 +477,7 @@ static void draw_card_select(const Game *g) {
     for (int i = 1; i < PLANT_COUNT; i++) {
         const PlantDef *def = &PLANT_DEFS[i];
         int y = 5 + i - 1;
-        int selected = g->card_cursor == i - 1;
+        int selected = g->card_focus == 0 && g->card_cursor == i - 1;
         int in_deck = deck_contains(g, (PlantType)i);
 
         if (selected) attron(A_REVERSE);
@@ -502,17 +506,25 @@ static void draw_card_select(const Game *g) {
     else
         mvprintw(11, 40, "SUN    -");
 
-    ui_draw_feedback(g, 17);
+    ui_draw_feedback(g, 16);
     if (g->deck_count == 0) {
         attron(A_DIM);
-        mvprintw(18, 2, "START//G");
-        add_field_separator();
-        printw("SELECT AT LEAST ONE PLANT");
+        mvprintw(17, 2, "SELECT AT LEAST ONE PLANT");
         attroff(A_DIM);
     }
+
+    int start_attrs = (g->card_focus == 1 ? A_REVERSE | A_BOLD : 0)
+                    | (g->deck_count == 0 ? A_DIM : 0);
+    if (start_attrs) attron(start_attrs);
+    mvprintw(18, cols / 2 - 11, "  START  ");
+    if (start_attrs) attroff(start_attrs);
+    if (g->card_focus == 2) attron(A_REVERSE | A_BOLD);
+    mvprintw(18, cols / 2 + 2, "  MENU  ");
+    if (g->card_focus == 2) attroff(A_REVERSE | A_BOLD);
+
     attron(COLOR_PAIR(UI_PAIR_INFO));
-    mvprintw(20, (cols - 68) / 2,
-             "MOVE//UP DOWN  TOGGLE//ENTER  SLOTS//LEFT RIGHT  START//G  BACK//Q");
+    mvprintw(20, (cols - 66) / 2,
+             "NAV//ARROWS HJKL  TOGGLE//ENTER  FOCUS//TAB  START//G  MENU//Q ESC");
     attroff(COLOR_PAIR(UI_PAIR_INFO));
 }
 
@@ -558,7 +570,7 @@ void render_frame(const Game *g) {
     else if (g->help_visible)
         ui_draw_help(g, overlay_center);
     else if (g->state == STATE_PAUSED)
-        ui_draw_pause(overlay_center);
+        ui_draw_pause(g, overlay_center);
 
     refresh();
 }

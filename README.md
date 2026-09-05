@@ -20,22 +20,25 @@ Plants vs. Zombies in your terminal — ncurses-based, emoji-rendered, chiptune-
 
 | Screen | Key | Action |
 | --- | --- | --- |
-| Menu | Up/Down or W/S/J/K | Choose level or endless mode |
-| Menu | Enter / Space | Open card selection |
-| Card selection | Up/Down or W/S/J/K | Choose a plant |
-| Card selection | Left/Right or A/D/H/L | Set 6–9 card slots |
+| Menu | Up/Down or J/K | Choose level, endless mode, or quit |
+| Menu | Enter | Confirm selection |
+| Card selection | Up/Down or J/K | Choose a plant |
+| Card selection | Left/Right or H/L | Set 6–9 card slots |
+| Card selection | Tab | Focus the plant list, Start, or Menu |
 | Card selection | Enter / Space | Add or remove a plant |
-| Card selection | G | Start with the selected deck |
-| Game | Arrow keys / WASD / HJKL | Move cursor |
+| Card selection | Enter | Activate the focused Start or Menu button |
+| Card selection | G / Q or Esc | Start the game / return to menu |
+| Game | Arrow keys / HJKL | Move cursor, wrapping at board edges |
+| Game | Tab | Move to the next row in the current column, wrapping to the top |
 | Game | 1–9 | Select a deck slot |
-| Game | 0 | Toggle shovel |
+| Game | Q/W/E/R | Select deck slots 6/7/8/9 |
+| Game | 0 or T | Toggle shovel |
 | Game | Enter / Space | Place plant or dig |
-| Game | P | Pause / unpause |
-| Game | ? | Open / close command help |
-| End screen | R | Return to card selection |
-| End screen | M | Return to menu |
-| Any screen except card selection | Q | Quit |
-| Card selection | Q | Return to menu |
+| Game | P or Esc | Open the pause menu |
+| Pause | P or Esc | Resume the game |
+| Pause / end menu | Up/Down or J/K | Choose an action |
+| Pause / end menu | Enter | Confirm selection |
+| Help | P or Esc | Return to the pause menu |
 
 ## Build
 

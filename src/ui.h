@@ -30,7 +30,7 @@ void ui_draw_hud(const Game *g, int start_y);
 void ui_draw_game_footer(const Game *g, int start_y);
 void ui_draw_feedback(const Game *g, int y);
 void ui_draw_help(const Game *g, int center_y);
-void ui_draw_pause(int center_y);
+void ui_draw_pause(const Game *g, int center_y);
 void ui_draw_endscreen(const Game *g, int center_y);
 
 #endif

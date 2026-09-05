@@ -5,11 +5,6 @@
 
 #include "../src/input.h"
 
-static void push_wheel(mmask_t state) {
-    MEVENT event = { .bstate = state };
-    assert(ungetmouse(&event) == OK);
-}
-
 int main(void) {
     assert(setenv("TERM", "xterm-256color", 1) == 0);
     FILE *input_file = tmpfile();
@@ -19,27 +14,18 @@ int main(void) {
     assert(screen);
     set_term(screen);
 
-    InputState input;
-    input_init(&input);
+    mousemask(ALL_MOUSE_EVENTS, NULL);
     assert(ungetch('\n') == OK);
-    push_wheel(BUTTON4_PRESSED);
-    input_init(&input);
-    assert(input_read(&input, 0) == ERR);
 
-    push_wheel(BUTTON4_PRESSED);
-    assert(input_read(&input, 0) == KEY_UP);
-    push_wheel(BUTTON5_PRESSED);
-    assert(input_read(&input, 30) == ERR);
-    push_wheel(BUTTON5_PRESSED);
-    assert(input_read(&input, 120) == KEY_DOWN);
+    input_init();
 
-    input_init(&input);
+    mmask_t old_mask;
+    mousemask(0, &old_mask);
+    assert(old_mask == 0);
+    assert(input_read() == ERR);
+
     assert(ungetch('x') == OK);
-    push_wheel(BUTTON4_PRESSED);
-    push_wheel(BUTTON4_PRESSED);
-    assert(input_read(&input, 0) == KEY_UP);
-    assert(input_read(&input, 0) == 'x');
-    assert(input_read(&input, 1000) == ERR);
+    assert(input_read() == 'x');
 
     endwin();
     delscreen(screen);

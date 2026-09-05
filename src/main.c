@@ -16,14 +16,13 @@ int main(void) {
     sound_init();
     render_init();
 
-    InputState input;
-    input_init(&input);
+    input_init();
     Game game;
     game_init(&game);
 
     int quit = 0;
     while (!quit) {
-        int ch = input_read(&input, input_now_ms());
+        int ch = input_read();
         if (ch != ERR) quit = game_handle_input(&game, ch);
         if (quit || lifecycle_signal()) break;
 

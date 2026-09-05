@@ -24,6 +24,7 @@ HDR     := $(wildcard src/*.h)
 BIN     := npvz
 TEST_BIN := tests/test_rules
 TEST_SRC := tests/test_rules.c tests/sound_stub.c src/game.c src/board.c src/crowd.c src/plant.c src/zombie.c src/projectile.c
+VOICE_TEST_BIN := tests/test_sound_voice
 ASCIIART := asciiart/newspaper-zombie.txt
 
 all: $(BIN)
@@ -35,14 +36,18 @@ src/%.o: src/%.c $(HDR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(NCURSES_CFLAGS) \
 		-DNPVZ_DATA_DIR=\"$(DATADIR)\" -c -o $@ $<
 
-test: $(TEST_BIN)
+test: $(TEST_BIN) $(VOICE_TEST_BIN)
 	./$(TEST_BIN)
+	./$(VOICE_TEST_BIN)
 
 $(TEST_BIN): $(TEST_SRC) $(HDR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(NCURSES_CFLAGS) -Isrc -o $@ $(TEST_SRC) -lm
 
+$(VOICE_TEST_BIN): tests/test_sound_voice.c src/sound_voice.c src/sound_voice.h src/sound.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -o $@ tests/test_sound_voice.c src/sound_voice.c
+
 clean:
-	rm -f $(OBJ) $(BIN) $(TEST_BIN)
+	rm -f $(OBJ) $(BIN) $(TEST_BIN) $(VOICE_TEST_BIN)
 
 install: $(BIN)
 	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(DATADIR)/asciiart

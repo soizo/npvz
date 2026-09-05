@@ -39,6 +39,7 @@ Plants vs. Zombies in your terminal — ncurses-based, emoji-rendered, chiptune-
 | Pause / end menu | Up/Down or J/K | Choose an action |
 | Pause / end menu | Enter | Confirm selection |
 | Help | P or Esc | Return to the pause menu |
+| Any screen | Ctrl+C | Clean up and exit immediately |
 
 ## Build
 
@@ -46,6 +47,9 @@ Plants vs. Zombies in your terminal — ncurses-based, emoji-rendered, chiptune-
 make
 ./npvz
 ```
+
+npvz prints a startup message and reports whether it exited normally or through
+a caught signal.
 
 ### Requirements
 

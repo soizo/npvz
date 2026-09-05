@@ -1,12 +1,18 @@
 #include "game.h"
+#include "lifecycle.h"
 #include "render.h"
 #include "sound.h"
 #include <ncurses.h>
+#include <stdio.h>
 
 #define FRAME_DELAY_MS 33  /* ~30 fps */
 #define INPUTS_PER_FRAME 16
 
 int main(void) {
+    lifecycle_install_signal_handlers();
+    puts("npvz: starting");
+    fflush(stdout);
+
     sound_init();
     render_init();
 
@@ -21,7 +27,7 @@ int main(void) {
         while (input_count < INPUTS_PER_FRAME && (ch = getch()) != ERR)
             inputs[input_count++] = ch;
         quit = game_handle_inputs(&game, inputs, input_count);
-        if (quit) break;
+        if (quit || lifecycle_signal()) break;
 
         game_update(&game);
         render_frame(&game);
@@ -30,5 +36,11 @@ int main(void) {
 
     render_cleanup();
     sound_cleanup();
-    return 0;
+
+    int signal_number = lifecycle_signal();
+    if (signal_number)
+        printf("npvz: interrupted by signal %d\n", signal_number);
+    else
+        puts("npvz: goodbye");
+    return lifecycle_exit_code(signal_number);
 }

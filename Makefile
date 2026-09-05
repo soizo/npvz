@@ -66,6 +66,9 @@ VOICE_TEST_BIN := tests/test_sound_voice
 SDL_TEST_BIN := tests/test_sound_sdl
 POSIX_TEST_BIN := tests/test_sound_posix
 LIFECYCLE_TEST_BIN := tests/test_lifecycle
+RENDER_TEST_BIN := tests/test_render_overlay
+RENDER_TEST_OBJ := tests/render_test.o
+INPUT_TEST_BIN := tests/test_input
 ASCIIART := asciiart/newspaper-zombie.txt
 
 all: $(BIN)
@@ -74,6 +77,7 @@ $(BIN): $(OBJ)
 	$(CC) $(LDFLAGS) -o $@ $^ $(NCURSES_LIBS) $(SOUND_LIBS) -lm
 
 src/lifecycle.o src/sound.o: CPPFLAGS += -D_POSIX_C_SOURCE=200809L
+src/render.o: CPPFLAGS += -D_XOPEN_SOURCE_EXTENDED=1
 
 src/%.o: src/%.c $(HDR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(NCURSES_CFLAGS) $(SOUND_CPPFLAGS) \
@@ -85,10 +89,12 @@ ifeq ($(SDL_MIXER_AVAILABLE),yes)
 endif
 
 test: $(TEST_BIN) $(VOICE_TEST_BIN) $(SDL_TESTS) $(POSIX_TEST_BIN) \
-		$(LIFECYCLE_TEST_BIN)
+		$(LIFECYCLE_TEST_BIN) $(RENDER_TEST_BIN) $(INPUT_TEST_BIN)
 	./$(TEST_BIN)
 	./$(VOICE_TEST_BIN)
 	./$(LIFECYCLE_TEST_BIN)
+	./$(RENDER_TEST_BIN)
+	./$(INPUT_TEST_BIN)
 ifeq ($(SDL_MIXER_AVAILABLE),yes)
 	SDL_AUDIODRIVER=dummy ./$(SDL_TEST_BIN)
 endif
@@ -116,9 +122,26 @@ $(LIFECYCLE_TEST_BIN): tests/test_lifecycle.c src/lifecycle.c src/lifecycle.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -D_POSIX_C_SOURCE=200809L \
 		-Isrc -o $@ tests/test_lifecycle.c src/lifecycle.c
 
+$(RENDER_TEST_OBJ): src/render.c $(HDR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(NCURSES_CFLAGS) \
+		-DNPVZ_RENDER_TEST -D_XOPEN_SOURCE_EXTENDED=1 \
+		-DNPVZ_DATA_DIR=\"$(DATADIR)\" -c -o $@ src/render.c
+
+$(RENDER_TEST_BIN): tests/test_render_overlay.c $(RENDER_TEST_OBJ) $(HDR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(NCURSES_CFLAGS) -Isrc \
+		-DNPVZ_DATA_DIR=\"$(DATADIR)\" -o $@ tests/test_render_overlay.c \
+		$(RENDER_TEST_OBJ) tests/sound_stub.c src/ui.c src/board.c \
+		src/crowd.c src/plant.c src/zombie.c src/projectile.c \
+		$(NCURSES_LIBS) -lm
+
+$(INPUT_TEST_BIN): tests/test_input.c src/input.c src/input.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(NCURSES_CFLAGS) -Isrc -o $@ \
+		tests/test_input.c src/input.c $(NCURSES_LIBS)
+
 clean:
 	rm -f $(OBJ) $(BIN) $(TEST_BIN) $(VOICE_TEST_BIN) $(SDL_TEST_BIN) \
-		$(POSIX_TEST_BIN) $(LIFECYCLE_TEST_BIN)
+		$(POSIX_TEST_BIN) $(LIFECYCLE_TEST_BIN) $(RENDER_TEST_BIN) \
+		$(RENDER_TEST_OBJ) $(INPUT_TEST_BIN)
 
 install: $(BIN)
 	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(DATADIR)/asciiart

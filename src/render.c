@@ -1,4 +1,4 @@
-#define _XOPEN_SOURCE_EXTENDED 1
+#define NCURSES_WIDECHAR 1
 #include "render.h"
 #include "crowd.h"
 #include "ui.h"
@@ -20,6 +20,7 @@
 #define GAME_MIN_ROWS 24
 #define GAME_MIN_COLS UI_CANVAS_WIDTH
 #define WIDTH_QUERY_TIMEOUT_US 50000
+#define OVERLAY_CACHE_FIELDS 7
 #define BOARD_WIDTH (GRID_LEFT + BOARD_COLS * CELL_WIDTH + CELL_WIDTH)
 
 static const wchar_t *ARMED_MINE_EMOJI = L"🕹\uFE0F";
@@ -27,6 +28,26 @@ static const wchar_t *ANGRY_ZOMBIE_EMOJI = L"😡\uFE0F";
 static const wchar_t *EXPLOSION_EMOJI = L"💥";
 static EmojiWidths emoji_widths;
 static int canvas_left;
+static int overlay_cache_valid;
+static int overlay_cache[OVERLAY_CACHE_FIELDS];
+
+#ifdef NPVZ_RENDER_TEST
+int render_refresh(void);
+int render_stage(void);
+int render_commit(void);
+#else
+static int render_refresh(void) {
+    return refresh();
+}
+
+static int render_stage(void) {
+    return wnoutrefresh(stdscr);
+}
+
+static int render_commit(void) {
+    return doupdate();
+}
+#endif
 
 static int write_terminal(const char *bytes, size_t length) {
     while (length > 0) {
@@ -95,7 +116,7 @@ static void calibrate_emoji_widths(void) {
     int table_enabled = 1;
 
     erase();
-    refresh();
+    render_refresh();
     for (int type = PLANT_SUNFLOWER; type < PLANT_COUNT && table_enabled; type++) {
         widths.plants[type] = measure_terminal_width(PLANT_DEFS[type].emoji);
         table_enabled = widths.plants[type] > 0;
@@ -118,7 +139,7 @@ static void calibrate_emoji_widths(void) {
     ui_set_emoji_widths(&widths, table_enabled);
     clearok(stdscr, TRUE);
     erase();
-    refresh();
+    render_refresh();
 }
 
 static void add_field_separator(void) {
@@ -161,6 +182,7 @@ static void draw_size_gate(int rows, int cols, int min_rows, int min_cols) {
 }
 
 void render_init(void) {
+    overlay_cache_valid = 0;
     setlocale(LC_ALL, "");
     initscr();
     cbreak();
@@ -342,7 +364,7 @@ static void draw_crowds(const Board *b, const ZombieCrowd *crowds,
         attroff(A_BOLD | COLOR_PAIR(pair));
         if (crowd->count > 1) {
             attron(A_DIM);
-            mvaddwstr(y + 1, x, L"×");
+            mvaddstr(y + 1, x, "×");
             printw("%d", crowd->count);
             attroff(A_DIM);
         }
@@ -524,14 +546,49 @@ static void draw_card_select(const Game *g) {
     attroff(COLOR_PAIR(UI_PAIR_INFO));
 }
 
+static void gray_overlay_background(int rows, int cols) {
+    for (int y = 0; y < rows; y++) {
+        for (int x = 0; x < cols; x++) {
+            cchar_t cell;
+            wchar_t text[CCHARW_MAX];
+            attr_t attrs;
+            short pair;
+            if (mvin_wch(y, x, &cell) == ERR
+                    || getcchar(&cell, text, &attrs, &pair, NULL) == ERR)
+                continue;
+
+            int width = wcswidth(text, CCHARW_MAX);
+            if (width > 1) {
+                attron(COLOR_PAIR(UI_PAIR_CROWD));
+                mvhline(y, x, ' ', width);
+                attroff(COLOR_PAIR(UI_PAIR_CROWD));
+                x += width - 1;
+            } else {
+                mvchgat(y, x, 1, A_DIM | (attrs & A_ALTCHARSET),
+                        UI_PAIR_GRID, NULL);
+            }
+        }
+    }
+}
+
 void render_frame(const Game *g) {
     int rows, cols, min_rows, min_cols;
-    erase();
     getmaxyx(stdscr, rows, cols);
+    int has_overlay = g->state == STATE_WON || g->state == STATE_LOST
+                   || g->help_visible || g->state == STATE_PAUSED;
+    int overlay_key[OVERLAY_CACHE_FIELDS] = {
+        rows, cols, g->state, g->mode, g->help_visible, g->menu_selection, g->wave
+    };
+    if (has_overlay && overlay_cache_valid
+            && memcmp(overlay_cache, overlay_key, sizeof(overlay_key)) == 0)
+        return;
+
+    overlay_cache_valid = 0;
+    erase();
     screen_min_size(g->state, &min_rows, &min_cols);
     if (rows < min_rows || cols < min_cols) {
         draw_size_gate(rows, cols, min_rows, min_cols);
-        refresh();
+        render_refresh();
         return;
     }
 
@@ -540,12 +597,12 @@ void render_frame(const Game *g) {
 
     if (g->state == STATE_MENU) {
         draw_menu(g);
-        refresh();
+        render_refresh();
         return;
     }
     if (g->state == STATE_CARD_SELECT) {
         draw_card_select(g);
-        refresh();
+        render_refresh();
         return;
     }
 
@@ -570,9 +627,10 @@ void render_frame(const Game *g) {
     ui_draw_game_footer(g, grid_bottom());
 
     int overlay_center = (grid_top() + grid_bottom() - 1) / 2;
-    int has_overlay = g->state == STATE_WON || g->state == STATE_LOST
-                   || g->help_visible || g->state == STATE_PAUSED;
-    if (has_overlay) refresh();
+    if (has_overlay) {
+        gray_overlay_background(rows, cols);
+        render_stage();
+    }
 
     if (g->state == STATE_WON || g->state == STATE_LOST)
         ui_draw_endscreen(g, overlay_center);
@@ -581,5 +639,13 @@ void render_frame(const Game *g) {
     else if (g->state == STATE_PAUSED)
         ui_draw_pause(g, overlay_center);
 
-    refresh();
+    if (!has_overlay) {
+        render_refresh();
+        return;
+    }
+
+    render_stage();
+    render_commit();
+    memcpy(overlay_cache, overlay_key, sizeof(overlay_key));
+    overlay_cache_valid = 1;
 }

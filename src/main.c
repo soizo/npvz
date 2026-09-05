@@ -1,4 +1,5 @@
 #include "game.h"
+#include "input.h"
 #include "lifecycle.h"
 #include "render.h"
 #include "sound.h"
@@ -15,12 +16,14 @@ int main(void) {
     sound_init();
     render_init();
 
+    InputState input;
+    input_init(&input);
     Game game;
     game_init(&game);
 
     int quit = 0;
     while (!quit) {
-        int ch = getch();
+        int ch = input_read(&input, input_now_ms());
         if (ch != ERR) quit = game_handle_input(&game, ch);
         if (quit || lifecycle_signal()) break;
 

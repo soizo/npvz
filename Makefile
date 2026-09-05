@@ -3,8 +3,45 @@ CPPFLAGS ?=
 CFLAGS   ?= -Wall -Wextra -O2 -std=c11
 LDFLAGS  ?=
 
+SDL_MIXER_AVAILABLE := $(shell pkg-config --exists SDL2_mixer 2>/dev/null && echo yes)
+SDL_MIXER_CFLAGS := $(shell pkg-config --cflags SDL2_mixer 2>/dev/null)
+SDL_MIXER_LIBS   := $(shell pkg-config --libs SDL2_mixer 2>/dev/null)
+
 # macOS ships ncurses with wide-char support built in
 UNAME_S := $(shell uname -s)
+SOUND_BACKEND ?= auto
+
+# pi-lens-ignore: SC1072, SC1064, SC1065, SC1073
+ifeq ($(SOUND_BACKEND),auto)
+    ifeq ($(SDL_MIXER_AVAILABLE),yes)
+        SELECTED_SOUND_BACKEND := sdl
+    else ifeq ($(UNAME_S),Darwin)
+        SELECTED_SOUND_BACKEND := audioqueue
+    else
+        SELECTED_SOUND_BACKEND := posix
+    endif
+else
+    SELECTED_SOUND_BACKEND := $(SOUND_BACKEND)
+endif
+
+ifeq ($(SELECTED_SOUND_BACKEND),sdl)
+    ifneq ($(SDL_MIXER_AVAILABLE),yes)
+        $(error SOUND_BACKEND=sdl requires pkg-config SDL2_mixer)
+    endif
+    SOUND_CPPFLAGS := -DNPVZ_SOUND_SDL $(SDL_MIXER_CFLAGS)
+    SOUND_LIBS := $(SDL_MIXER_LIBS)
+else ifeq ($(SELECTED_SOUND_BACKEND),audioqueue)
+    ifneq ($(UNAME_S),Darwin)
+        $(error SOUND_BACKEND=audioqueue is supported only on macOS)
+    endif
+    SOUND_CPPFLAGS := -DNPVZ_SOUND_AUDIOQUEUE
+    SOUND_LIBS := -framework AudioToolbox -framework CoreFoundation
+else ifeq ($(SELECTED_SOUND_BACKEND),posix)
+    SOUND_CPPFLAGS := -DNPVZ_SOUND_POSIX
+else
+    $(error SOUND_BACKEND must be auto, sdl, audioqueue, or posix)
+endif
+
 # pi-lens-ignore: SC1072, SC1064, SC1065, SC1073
 ifeq ($(UNAME_S),Darwin)
     NCURSES_CFLAGS :=
@@ -25,20 +62,29 @@ BIN     := npvz
 TEST_BIN := tests/test_rules
 TEST_SRC := tests/test_rules.c tests/sound_stub.c src/game.c src/board.c src/crowd.c src/plant.c src/zombie.c src/projectile.c
 VOICE_TEST_BIN := tests/test_sound_voice
+SDL_TEST_BIN := tests/test_sound_sdl
 ASCIIART := asciiart/newspaper-zombie.txt
 
 all: $(BIN)
 
 $(BIN): $(OBJ)
-	$(CC) $(LDFLAGS) -o $@ $^ $(NCURSES_LIBS) -lm
+	$(CC) $(LDFLAGS) -o $@ $^ $(NCURSES_LIBS) $(SOUND_LIBS) -lm
 
 src/%.o: src/%.c $(HDR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(NCURSES_CFLAGS) \
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(NCURSES_CFLAGS) $(SOUND_CPPFLAGS) \
 		-DNPVZ_DATA_DIR=\"$(DATADIR)\" -c -o $@ $<
 
-test: $(TEST_BIN) $(VOICE_TEST_BIN)
+SDL_TESTS :=
+ifeq ($(SDL_MIXER_AVAILABLE),yes)
+    SDL_TESTS := $(SDL_TEST_BIN)
+endif
+
+test: $(TEST_BIN) $(VOICE_TEST_BIN) $(SDL_TESTS)
 	./$(TEST_BIN)
 	./$(VOICE_TEST_BIN)
+ifeq ($(SDL_MIXER_AVAILABLE),yes)
+	SDL_AUDIODRIVER=dummy ./$(SDL_TEST_BIN)
+endif
 
 $(TEST_BIN): $(TEST_SRC) $(HDR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(NCURSES_CFLAGS) -Isrc -o $@ $(TEST_SRC) -lm
@@ -46,8 +92,13 @@ $(TEST_BIN): $(TEST_SRC) $(HDR)
 $(VOICE_TEST_BIN): tests/test_sound_voice.c src/sound_voice.c src/sound_voice.h src/sound.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -o $@ tests/test_sound_voice.c src/sound_voice.c
 
+$(SDL_TEST_BIN): tests/test_sound_sdl.c src/sound.c src/sound_voice.c $(HDR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DNPVZ_SOUND_SDL $(SDL_MIXER_CFLAGS) \
+		-Isrc -o $@ tests/test_sound_sdl.c src/sound.c src/sound_voice.c \
+		$(SDL_MIXER_LIBS) -lm
+
 clean:
-	rm -f $(OBJ) $(BIN) $(TEST_BIN) $(VOICE_TEST_BIN)
+	rm -f $(OBJ) $(BIN) $(TEST_BIN) $(VOICE_TEST_BIN) $(SDL_TEST_BIN)
 
 install: $(BIN)
 	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(DATADIR)/asciiart

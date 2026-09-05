@@ -37,7 +37,8 @@ else ifeq ($(SELECTED_SOUND_BACKEND),audioqueue)
     SOUND_CPPFLAGS := -DNPVZ_SOUND_AUDIOQUEUE
     SOUND_LIBS := -framework AudioToolbox -framework CoreFoundation
 else ifeq ($(SELECTED_SOUND_BACKEND),posix)
-    SOUND_CPPFLAGS := -DNPVZ_SOUND_POSIX
+    SOUND_CPPFLAGS := -DNPVZ_SOUND_POSIX \
+        $(if $(filter Linux,$(UNAME_S)),-DNPVZ_SOUND_LINUX)
 else
     $(error SOUND_BACKEND must be auto, sdl, audioqueue, or posix)
 endif
@@ -63,12 +64,15 @@ TEST_BIN := tests/test_rules
 TEST_SRC := tests/test_rules.c tests/sound_stub.c src/game.c src/board.c src/crowd.c src/plant.c src/zombie.c src/projectile.c
 VOICE_TEST_BIN := tests/test_sound_voice
 SDL_TEST_BIN := tests/test_sound_sdl
+POSIX_TEST_BIN := tests/test_sound_posix
 ASCIIART := asciiart/newspaper-zombie.txt
 
 all: $(BIN)
 
 $(BIN): $(OBJ)
 	$(CC) $(LDFLAGS) -o $@ $^ $(NCURSES_LIBS) $(SOUND_LIBS) -lm
+
+src/sound.o: CPPFLAGS += -D_POSIX_C_SOURCE=200809L
 
 src/%.o: src/%.c $(HDR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(NCURSES_CFLAGS) $(SOUND_CPPFLAGS) \
@@ -93,12 +97,19 @@ $(VOICE_TEST_BIN): tests/test_sound_voice.c src/sound_voice.c src/sound_voice.h 
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -o $@ tests/test_sound_voice.c src/sound_voice.c
 
 $(SDL_TEST_BIN): tests/test_sound_sdl.c src/sound.c src/sound_voice.c $(HDR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DNPVZ_SOUND_SDL $(SDL_MIXER_CFLAGS) \
+	$(CC) $(CPPFLAGS) $(CFLAGS) -D_POSIX_C_SOURCE=200809L \
+		-DNPVZ_SOUND_SDL $(SDL_MIXER_CFLAGS) \
 		-Isrc -o $@ tests/test_sound_sdl.c src/sound.c src/sound_voice.c \
 		$(SDL_MIXER_LIBS) -lm
 
+$(POSIX_TEST_BIN): tests/test_sound_posix.c src/sound.c src/sound_voice.c $(HDR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -D_POSIX_C_SOURCE=200809L \
+		-DNPVZ_SOUND_POSIX -Isrc -o $@ tests/test_sound_posix.c \
+		src/sound.c src/sound_voice.c -lm
+
 clean:
-	rm -f $(OBJ) $(BIN) $(TEST_BIN) $(VOICE_TEST_BIN) $(SDL_TEST_BIN)
+	rm -f $(OBJ) $(BIN) $(TEST_BIN) $(VOICE_TEST_BIN) $(SDL_TEST_BIN) \
+		$(POSIX_TEST_BIN)
 
 install: $(BIN)
 	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(DATADIR)/asciiart

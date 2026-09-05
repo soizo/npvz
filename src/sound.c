@@ -15,7 +15,9 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #else
+#include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -290,11 +292,18 @@ void sound_cleanup(void) {
 
 #else
 
-static char sfx_paths[SFX_COUNT][64];
+#define POSIX_VOICES 4
+#define SHUTDOWN_TIMEOUT_MS 200
 
-static void write_wav(const char *path, const SoundSample *sample) {
+static char sfx_paths[SFX_COUNT][80];
+static pid_t player_pids[POSIX_VOICES];
+static SoundVoicePool voices;
+static int enabled;
+static int initialized;
+
+static int write_wav(const char *path, const SoundSample *sample) {
     FILE *file = fopen(path, "wb");
-    if (!file) return;
+    if (!file) return 0;
 
     int32_t data_size = (int32_t)(sample->count * 2);
     int32_t riff_size = 36 + data_size;
@@ -320,22 +329,84 @@ static void write_wav(const char *path, const SoundSample *sample) {
     fwrite("data", 1, 4, file);
     fwrite(&data_size, 4, 1, file);
     fwrite(sample->samples, 2, sample->count, file);
-    fclose(file);
+    int ok = !ferror(file) && fclose(file) == 0;
+    if (!ok) unlink(path);
+    return ok;
 }
 
-void sound_init(void) {
-    generate_samples();
-    for (int i = 0; i < SFX_COUNT; i++) {
-        snprintf(sfx_paths[i], sizeof(sfx_paths[i]), "/tmp/npvz_sfx_%d.wav", i);
-        write_wav(sfx_paths[i], &sample_bank[i]);
+static void wait_for_pid(pid_t pid) {
+    while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {}
+}
+
+static void reap_players(uint64_t now) {
+    for (int slot = 0; slot < POSIX_VOICES; slot++) {
+        if (player_pids[slot] <= 0) continue;
+        int status = 0;
+        pid_t result = waitpid(player_pids[slot], &status, WNOHANG);
+        if (result == player_pids[slot]) {
+            player_pids[slot] = 0;
+            sound_voice_release(&voices, slot, now);
+            if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) enabled = 0;
+        } else if (result < 0 && errno == ECHILD) {
+            player_pids[slot] = 0;
+            sound_voice_release(&voices, slot, now);
+        }
     }
 }
 
+static void exec_player(const char *path) {
+#if defined(NPVZ_SOUND_LINUX)
+    execlp("pw-play", "pw-play", path, (char *)NULL);
+    if (errno != ENOENT) _exit(126);
+    execlp("paplay", "paplay", path, (char *)NULL);
+    if (errno != ENOENT) _exit(126);
+    execlp("aplay", "aplay", "-q", path, (char *)NULL);
+#else
+    execlp("aucat", "aucat", "-i", path, (char *)NULL);
+    if (errno != ENOENT) _exit(126);
+    execlp("audioplay", "audioplay", path, (char *)NULL);
+    if (errno != ENOENT) _exit(126);
+    execlp("play", "play", "-q", path, (char *)NULL);
+#endif
+    _exit(errno == ENOENT ? 127 : 126);
+}
+
+void sound_init(void) {
+    sound_cleanup();
+    generate_samples();
+    sound_voice_pool_init(&voices, POSIX_VOICES, 3, 100);
+    initialized = 1;
+
+    for (int i = 0; i < SFX_COUNT; i++) {
+        snprintf(sfx_paths[i], sizeof(sfx_paths[i]),
+                 "/tmp/npvz_sfx_%ld_%d.wav", (long)getpid(), i);
+        if (!write_wav(sfx_paths[i], &sample_bank[i])) {
+            sound_cleanup();
+            return;
+        }
+    }
+    enabled = 1;
+}
+
 void sound_play(SfxType type) {
-    if (type < 0 || type >= SFX_COUNT) return;
-    while (waitpid(-1, NULL, WNOHANG) > 0) {}
+    if (!enabled || type < 0 || type >= SFX_COUNT) return;
+    uint64_t now = monotonic_ms();
+    reap_players(now);
+    if (!enabled) return;
+
+    int slot = sound_voice_acquire(&voices, type, now);
+    if (slot < 0) return;
+    if (player_pids[slot] > 0) {
+        kill(player_pids[slot], SIGKILL);
+        wait_for_pid(player_pids[slot]);
+        player_pids[slot] = 0;
+    }
 
     pid_t pid = fork();
+    if (pid < 0) {
+        sound_voice_release(&voices, slot, now);
+        return;
+    }
     if (pid == 0) {
         int devnull = open("/dev/null", O_RDWR);
         if (devnull >= 0) {
@@ -344,14 +415,50 @@ void sound_play(SfxType type) {
             dup2(devnull, STDERR_FILENO);
             close(devnull);
         }
-        execlp("afplay", "afplay", sfx_paths[type], (char *)NULL);
-        _exit(1);
+        exec_player(sfx_paths[type]);
     }
+    player_pids[slot] = pid;
 }
 
 void sound_cleanup(void) {
-    for (int i = 0; i < SFX_COUNT; i++) unlink(sfx_paths[i]);
-    while (waitpid(-1, NULL, WNOHANG) > 0) {}
+    enabled = 0;
+    for (int slot = 0; slot < POSIX_VOICES; slot++)
+        if (player_pids[slot] > 0) kill(player_pids[slot], SIGTERM);
+
+    uint64_t deadline = monotonic_ms() + SHUTDOWN_TIMEOUT_MS;
+    int remaining;
+    do {
+        remaining = 0;
+        for (int slot = 0; slot < POSIX_VOICES; slot++) {
+            if (player_pids[slot] <= 0) continue;
+            pid_t result = waitpid(player_pids[slot], NULL, WNOHANG);
+            if (result == player_pids[slot] ||
+                (result < 0 && errno == ECHILD)) {
+                player_pids[slot] = 0;
+            } else {
+                remaining++;
+            }
+        }
+        if (remaining && monotonic_ms() < deadline) {
+            struct timespec delay = {.tv_nsec = 10000000};
+            nanosleep(&delay, NULL);
+        }
+    } while (remaining && monotonic_ms() < deadline);
+
+    for (int slot = 0; slot < POSIX_VOICES; slot++) {
+        if (player_pids[slot] <= 0) continue;
+        kill(player_pids[slot], SIGKILL);
+        wait_for_pid(player_pids[slot]);
+        player_pids[slot] = 0;
+    }
+    if (initialized) {
+        for (int i = 0; i < SFX_COUNT; i++) {
+            if (sfx_paths[i][0]) unlink(sfx_paths[i]);
+            sfx_paths[i][0] = '\0';
+        }
+    }
+    initialized = 0;
+    memset(&voices, 0, sizeof(voices));
 }
 
 #endif

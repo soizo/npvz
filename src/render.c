@@ -570,6 +570,10 @@ void render_frame(const Game *g) {
     ui_draw_game_footer(g, grid_bottom());
 
     int overlay_center = (grid_top() + grid_bottom() - 1) / 2;
+    int has_overlay = g->state == STATE_WON || g->state == STATE_LOST
+                   || g->help_visible || g->state == STATE_PAUSED;
+    if (has_overlay) refresh();
+
     if (g->state == STATE_WON || g->state == STATE_LOST)
         ui_draw_endscreen(g, overlay_center);
     else if (g->help_visible)

@@ -327,15 +327,46 @@ static void draw_box(int top, int left, int height, int width) {
     }
 }
 
+typedef struct {
+    int top;
+    int left;
+    int content_left;
+    int content_width;
+} OverlayLayout;
+
+static OverlayLayout draw_overlay_shell(int center_y, int height, int width,
+                                        const char *title, int title_pair,
+                                        int title_row, int art_rows) {
+    int top = center_y - height / 2;
+    int left = ui_origin_x + (UI_CANVAS_WIDTH - width) / 2;
+    int content_left = left + (art_rows > 0 ? 25 : 1);
+    int content_width = left + width - 1 - content_left;
+
+    draw_box(top, left, height, width);
+    if (art_rows > 0) {
+        int art_x = left + 2 + (PAUSE_ART_WIDTH - pause_art_width) / 2;
+        for (int i = 0; i < art_rows; i++)
+            mvaddwstr(top + 1 + i, art_x, pause_art[i]);
+        for (int y = 1; y < height - 1; y++)
+            mvaddch(top + y, left + 24, ACS_VLINE);
+    }
+
+    int title_x = content_left
+                + (content_width - (int)strlen(title)) / 2;
+    attron(A_BOLD | COLOR_PAIR(title_pair));
+    mvprintw(top + title_row, title_x, "%s", title);
+    attroff(A_BOLD | COLOR_PAIR(title_pair));
+
+    OverlayLayout layout = { top, left, content_left, content_width };
+    return layout;
+}
+
 void ui_draw_help(const Game *g, int center_y) {
     (void)g;
-    int top = center_y - 6;
-    int left = ui_origin_x + (UI_CANVAS_WIDTH - 50) / 2;
-
-    draw_box(top, left, 12, 50);
-    attron(A_BOLD | COLOR_PAIR(UI_PAIR_INFO));
-    mvprintw(top + 1, left + 18, "COMMAND HELP");
-    attroff(A_BOLD | COLOR_PAIR(UI_PAIR_INFO));
+    OverlayLayout overlay = draw_overlay_shell(
+        center_y, 12, 50, "COMMAND HELP", UI_PAIR_INFO, 1, 0);
+    int top = overlay.top;
+    int left = overlay.left;
     mvprintw(top + 2, left + 3, "MOVE        ARROWS / HJKL (WRAPS)");
     mvprintw(top + 3, left + 3, "NEXT ROW    TAB (WRAPS)");
     mvprintw(top + 4, left + 3, "SELECT      1-9");
@@ -350,23 +381,13 @@ void ui_draw_pause(const Game *g, int center_y) {
     int art_rows = load_pause_art();
     int height = art_rows > 0 ? 13 : 9;
     int width = art_rows > 0 ? 62 : 40;
-    int top = center_y - height / 2;
-    int left = ui_origin_x + (UI_CANVAS_WIDTH - width) / 2;
-    int title_x = art_rows > 0 ? left + 40 : left + 17;
+    OverlayLayout overlay = draw_overlay_shell(
+        center_y, height, width, "PAUSED", UI_PAIR_INFO, 2, art_rows);
+    int top = overlay.top;
+    int left = overlay.left;
     int item_x = art_rows > 0 ? left + 34 : left + 14;
     int footer_x = art_rows > 0 ? left + 27 : left + 4;
     static const char *items[] = { "RESUME", "HELP", "MENU" };
-
-    draw_box(top, left, height, width);
-    if (art_rows > 0) {
-        int art_x = left + 2 + (PAUSE_ART_WIDTH - pause_art_width) / 2;
-        for (int i = 0; i < art_rows; i++)
-            mvaddwstr(top + 1 + i, art_x, pause_art[i]);
-        for (int y = 1; y < height - 1; y++) mvaddch(top + y, left + 24, '|');
-    }
-    attron(A_BOLD | COLOR_PAIR(UI_PAIR_INFO));
-    mvprintw(top + 2, title_x, "PAUSED");
-    attroff(A_BOLD | COLOR_PAIR(UI_PAIR_INFO));
     for (int i = 0; i < 3; i++) {
         if (g->menu_selection == i) attron(A_REVERSE | A_BOLD);
         mvprintw(top + 4 + i, item_x, "%c %-10s",
@@ -381,16 +402,13 @@ void ui_draw_pause(const Game *g, int center_y) {
 
 void ui_draw_endscreen(const Game *g, int center_y) {
     int display_wave = g->mode == MODE_LEVEL && g->wave > 5 ? 5 : g->wave;
-    int top = center_y - 4;
-    int left = ui_origin_x + (UI_CANVAS_WIDTH - 40) / 2;
     int pair = g->state == STATE_WON ? UI_PAIR_READY : UI_PAIR_DANGER;
+    const char *title = g->state == STATE_WON ? "LEVEL CLEAR" : "LAWN OVERRUN";
+    OverlayLayout overlay = draw_overlay_shell(
+        center_y, 8, 40, title, pair, 1, 0);
+    int top = overlay.top;
+    int left = overlay.left;
     static const char *items[] = { "RESELECT", "MENU" };
-
-    draw_box(top, left, 8, 40);
-    attron(A_BOLD | COLOR_PAIR(pair));
-    mvprintw(top + 1, left + (g->state == STATE_WON ? 14 : 12),
-             "%s", g->state == STATE_WON ? "LEVEL CLEAR" : "LAWN OVERRUN");
-    attroff(A_BOLD | COLOR_PAIR(pair));
     mvprintw(top + 2, left + 16, "WAVE %d", display_wave);
     for (int i = 0; i < 2; i++) {
         if (g->menu_selection == i) attron(A_REVERSE | A_BOLD);

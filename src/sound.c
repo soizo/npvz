@@ -10,6 +10,10 @@
 #if defined(NPVZ_SOUND_SDL)
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_mixer.h>
+#elif defined(NPVZ_SOUND_AUDIOQUEUE)
+#include <AudioToolbox/AudioQueue.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #else
 #include <fcntl.h>
 #include <sys/wait.h>
@@ -198,6 +202,90 @@ void sound_cleanup(void) {
     if (sdl_audio_owned) SDL_QuitSubSystem(SDL_INIT_AUDIO);
     sdl_audio_owned = 0;
     memset(&voices, 0, sizeof(voices));
+}
+
+#elif defined(NPVZ_SOUND_AUDIOQUEUE)
+
+#define AUDIO_QUEUE_BUFFERS 3
+#define AUDIO_QUEUE_FRAMES 512
+
+static AudioQueueRef audio_queue;
+static SoundVoicePool voices;
+static pthread_mutex_t voice_lock = PTHREAD_MUTEX_INITIALIZER;
+static atomic_int enabled;
+
+static void fill_audio_buffer(void *context, AudioQueueRef queue,
+                              AudioQueueBufferRef buffer) {
+    (void)context;
+    if (!atomic_load(&enabled)) return;
+
+    size_t frames = buffer->mAudioDataBytesCapacity / sizeof(int16_t);
+    pthread_mutex_lock(&voice_lock);
+    sound_voice_mix(&voices, sample_bank, buffer->mAudioData, frames,
+                    monotonic_ms());
+    pthread_mutex_unlock(&voice_lock);
+    buffer->mAudioDataByteSize = (UInt32)(frames * sizeof(int16_t));
+    if (atomic_load(&enabled))
+        AudioQueueEnqueueBuffer(queue, buffer, 0, NULL);
+}
+
+void sound_init(void) {
+    sound_cleanup();
+    generate_samples();
+    sound_voice_pool_init(&voices, SOUND_MAX_VOICES, 6, 0);
+
+    AudioStreamBasicDescription format = {0};
+    format.mSampleRate = SR;
+    format.mFormatID = kAudioFormatLinearPCM;
+    format.mFormatFlags = kLinearPCMFormatFlagIsSignedInteger |
+                          kAudioFormatFlagIsPacked |
+                          kAudioFormatFlagsNativeEndian;
+    format.mBytesPerPacket = sizeof(int16_t);
+    format.mFramesPerPacket = 1;
+    format.mBytesPerFrame = sizeof(int16_t);
+    format.mChannelsPerFrame = 1;
+    format.mBitsPerChannel = 16;
+
+    if (AudioQueueNewOutput(&format, fill_audio_buffer, NULL, NULL, NULL, 0,
+                            &audio_queue) != noErr)
+        return;
+
+    atomic_store(&enabled, 1);
+    for (int i = 0; i < AUDIO_QUEUE_BUFFERS; i++) {
+        AudioQueueBufferRef buffer;
+        if (AudioQueueAllocateBuffer(audio_queue,
+                                     AUDIO_QUEUE_FRAMES * sizeof(int16_t),
+                                     &buffer) != noErr) {
+            sound_cleanup();
+            return;
+        }
+        memset(buffer->mAudioData, 0, buffer->mAudioDataBytesCapacity);
+        buffer->mAudioDataByteSize = buffer->mAudioDataBytesCapacity;
+        if (AudioQueueEnqueueBuffer(audio_queue, buffer, 0, NULL) != noErr) {
+            sound_cleanup();
+            return;
+        }
+    }
+    if (AudioQueueStart(audio_queue, NULL) != noErr) sound_cleanup();
+}
+
+void sound_play(SfxType type) {
+    if (!atomic_load(&enabled) || type < 0 || type >= SFX_COUNT) return;
+    pthread_mutex_lock(&voice_lock);
+    sound_voice_acquire(&voices, type, monotonic_ms());
+    pthread_mutex_unlock(&voice_lock);
+}
+
+void sound_cleanup(void) {
+    atomic_store(&enabled, 0);
+    if (audio_queue) {
+        AudioQueueStop(audio_queue, true);
+        AudioQueueDispose(audio_queue, true);
+        audio_queue = NULL;
+    }
+    pthread_mutex_lock(&voice_lock);
+    memset(&voices, 0, sizeof(voices));
+    pthread_mutex_unlock(&voice_lock);
 }
 
 #else

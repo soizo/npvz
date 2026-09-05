@@ -347,12 +347,6 @@ int game_handle_input(Game *g, int ch) {
     return 0;
 }
 
-int game_handle_inputs(Game *g, const int *inputs, int count) {
-    for (int i = 0; i < count; i++)
-        if (game_handle_input(g, inputs[i])) return 1;
-    return 0;
-}
-
 void game_update(Game *g) {
     if (g->help_visible) return;
     if (g->feedback_ticks > 0 && --g->feedback_ticks == 0)

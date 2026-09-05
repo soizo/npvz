@@ -264,20 +264,6 @@ static void test_menu_navigation_wraps(void) {
     assert(g.menu_selection == 0);
 }
 
-static void test_input_batch_moves_diagonally(void) {
-    Game g;
-    const int up_right[] = {KEY_UP, KEY_RIGHT};
-
-    game_init(&g);
-    g.state = STATE_PLAYING;
-    g.cursor_row = 0;
-    g.cursor_col = BOARD_COLS - 1;
-
-    assert(game_handle_inputs(&g, up_right, 2) == 0);
-    assert(g.cursor_row == BOARD_ROWS - 1);
-    assert(g.cursor_col == 0);
-}
-
 static void test_gameplay_key_map(void) {
     Game g;
 
@@ -742,7 +728,6 @@ int main(void) {
     test_shovel_and_deck_feedback_contract();
     test_pause_menu_and_help_freeze_play();
     test_menu_navigation_wraps();
-    test_input_batch_moves_diagonally();
     test_gameplay_key_map();
     test_mode_completion_contract();
     test_squash_targets_closest_zombie();

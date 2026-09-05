@@ -19,7 +19,6 @@ Down
 Enter
 Type "g"
 Sleep 1s
-Up
 Right
 Sleep 1s
 Type "p"

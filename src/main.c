@@ -6,7 +6,6 @@
 #include <stdio.h>
 
 #define FRAME_DELAY_MS 33  /* ~30 fps */
-#define INPUTS_PER_FRAME 16
 
 int main(void) {
     lifecycle_install_signal_handlers();
@@ -21,12 +20,8 @@ int main(void) {
 
     int quit = 0;
     while (!quit) {
-        int inputs[INPUTS_PER_FRAME];
-        int input_count = 0;
-        int ch;
-        while (input_count < INPUTS_PER_FRAME && (ch = getch()) != ERR)
-            inputs[input_count++] = ch;
-        quit = game_handle_inputs(&game, inputs, input_count);
+        int ch = getch();
+        if (ch != ERR) quit = game_handle_input(&game, ch);
         if (quit || lifecycle_signal()) break;
 
         game_update(&game);

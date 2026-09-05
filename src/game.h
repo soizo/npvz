@@ -65,7 +65,6 @@ typedef struct {
 void game_init(Game *g);
 void game_start_playing(Game *g);
 int  game_handle_input(Game *g, int ch);
-int  game_handle_inputs(Game *g, const int *inputs, int count);
 void game_update(Game *g);
 int  game_is_over(Game *g);
 

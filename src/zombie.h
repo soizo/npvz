@@ -29,7 +29,7 @@ typedef struct {
     int eating;         /* 1 if currently eating a plant */
     int eat_timer;      /* ticks until next bite */
     int alive;
-    int exploding;      /* >0: show 💥, counts down to death */
+    int hit_ticks;      /* foreground hit feedback */
     int armor_hp;       /* headgear hp: cone/bucket, 0 for normal */
     int summon_timer;   /* dancer: ticks until summon backup dancers */
     int has_summoned;   /* dancer: 1 if already summoned */

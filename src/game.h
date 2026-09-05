@@ -17,10 +17,25 @@ typedef enum {
     MODE_ENDLESS
 } GameMode;
 
+typedef enum {
+    FEEDBACK_NONE,
+    FEEDBACK_NO_PLANT,
+    FEEDBACK_NEED_SUN,
+    FEEDBACK_COOLDOWN,
+    FEEDBACK_OCCUPIED,
+    FEEDBACK_PLANTED,
+    FEEDBACK_SHOVEL_ON,
+    FEEDBACK_SHOVEL_OFF,
+    FEEDBACK_REMOVED,
+    FEEDBACK_NOTHING_TO_REMOVE,
+    FEEDBACK_DECK_FULL,
+    FEEDBACK_EMPTY_DECK
+} GameFeedback;
+
 typedef struct {
     GameState state;
     GameMode mode;
-    int menu_selection;         /* 0 = level, 1 = endless */
+    int menu_selection;         /* selected item on the active menu */
     Board board;
     int sun;
     int level;
@@ -39,6 +54,12 @@ typedef struct {
     PlantType deck[PLANT_COUNT]; /* selected plants for this game */
     int deck_count;             /* how many plants in deck */
     int card_cursor;            /* cursor in card selection screen */
+    int card_focus;             /* 0 = plants, 1 = start, 2 = menu */
+
+    /* transient interface state */
+    GameFeedback feedback;
+    int feedback_ticks;
+    int help_visible;
 } Game;
 
 void game_init(Game *g);

@@ -16,20 +16,21 @@ typedef struct {
     int triggered;
 } LawnMower;
 
-#define MAX_VFX 64
+#define MAX_COMBAT_EFFECTS 64
 
 typedef enum {
-    VFX_HIT,         /* zombie hit: gray bg flash */
-    VFX_DEATH_SHOT,  /* killed by projectile: white bg */
-    VFX_DEATH_BOOM   /* killed by explosion: white bg + 💥 */
-} VfxType;
+    COMBAT_EFFECT_DEATH,
+    COMBAT_EFFECT_BLAST
+} CombatEffectKind;
 
 typedef struct {
-    VfxType type;
+    CombatEffectKind kind;
     int row;
     float x;
     int timer;
-} Vfx;
+    ZombieType zombie_type;
+    int angry;
+} CombatEffect;
 
 typedef struct {
     Plant cells[BOARD_ROWS][BOARD_COLS];
@@ -38,8 +39,9 @@ typedef struct {
     Projectile projectiles[MAX_PROJECTILES];
     int projectile_count;
     LawnMower mowers[BOARD_ROWS];
-    Vfx vfx[MAX_VFX];
-    int vfx_count;
+    CombatEffect effects[MAX_COMBAT_EFFECTS];
+    int effect_count;
+    int plant_flash_ticks[BOARD_ROWS][BOARD_COLS];
 } Board;
 
 /* display characters */

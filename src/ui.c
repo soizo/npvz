@@ -310,22 +310,20 @@ void ui_draw_game_footer(const Game *g, int start_y) {
 }
 
 static void draw_box(int top, int left, int height, int width) {
-    for (int y = 0; y < height; y++) {
-        move(top + y, left);
-        for (int x = 0; x < width; x++) addch(' ');
-    }
+    for (int y = -1; y <= height; y++)
+        mvhline(top + y, left - 2, ' ', width + 4);
 
-    mvaddch(top, left, '+');
-    mvaddch(top, left + width - 1, '+');
-    mvaddch(top + height - 1, left, '+');
-    mvaddch(top + height - 1, left + width - 1, '+');
+    mvaddch(top, left, ACS_ULCORNER);
+    mvaddch(top, left + width - 1, ACS_URCORNER);
+    mvaddch(top + height - 1, left, ACS_LLCORNER);
+    mvaddch(top + height - 1, left + width - 1, ACS_LRCORNER);
     for (int x = 1; x < width - 1; x++) {
-        mvaddch(top, left + x, '-');
-        mvaddch(top + height - 1, left + x, '-');
+        mvaddch(top, left + x, ACS_HLINE);
+        mvaddch(top + height - 1, left + x, ACS_HLINE);
     }
     for (int y = 1; y < height - 1; y++) {
-        mvaddch(top + y, left, '|');
-        mvaddch(top + y, left + width - 1, '|');
+        mvaddch(top + y, left, ACS_VLINE);
+        mvaddch(top + y, left + width - 1, ACS_VLINE);
     }
 }
 

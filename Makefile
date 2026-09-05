@@ -83,12 +83,14 @@ ifeq ($(SDL_MIXER_AVAILABLE),yes)
     SDL_TESTS := $(SDL_TEST_BIN)
 endif
 
-test: $(TEST_BIN) $(VOICE_TEST_BIN) $(SDL_TESTS)
+test: $(TEST_BIN) $(VOICE_TEST_BIN) $(SDL_TESTS) $(POSIX_TEST_BIN)
 	./$(TEST_BIN)
 	./$(VOICE_TEST_BIN)
 ifeq ($(SDL_MIXER_AVAILABLE),yes)
 	SDL_AUDIODRIVER=dummy ./$(SDL_TEST_BIN)
 endif
+	./$(POSIX_TEST_BIN)
+	./tests/test_audioqueue_build.sh
 
 $(TEST_BIN): $(TEST_SRC) $(HDR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(NCURSES_CFLAGS) -Isrc -o $@ $(TEST_SRC) -lm

@@ -14,7 +14,7 @@ Plants vs. Zombies in your terminal — ncurses-based, emoji-rendered, chiptune-
 - **Shovel** ⛏ to remove placed plants
 - **Projectiles** rendered as `·` (middle dot)
 - **VFX:** hit flash, death flash, and explosions
-- **Chiptune SFX** synthesized at launch and played via `afplay`
+- **Bounded polyphonic SFX** synthesized at launch with up to eight overlapping voices
 
 ## Controls
 
@@ -49,10 +49,24 @@ make
 
 ### Requirements
 
-- macOS (uses system `ncurses` and `afplay` for audio)
+- macOS, Linux, or BSD
 - C11 compiler (`cc` / `clang`)
+- System `ncurses`
 
-No external dependencies.
+SDL2_mixer is used automatically when available. Without it, macOS uses
+AudioToolbox; Linux uses `pw-play`, `paplay`, or `aplay`; and BSD uses `aucat`,
+`audioplay`, or `play`. If no supported player is installed, gameplay remains
+available without sound.
+
+Select a backend explicitly when needed:
+
+```sh
+make clean && make SOUND_BACKEND=sdl
+make clean && make SOUND_BACKEND=audioqueue  # macOS only
+make clean && make SOUND_BACKEND=posix
+```
+
+SDL2_mixer is optional; no new dependency is required.
 
 ### Install
 

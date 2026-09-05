@@ -9,10 +9,15 @@ Type "TERM=xterm-256color ./npvz"
 Enter
 Sleep 1s
 Enter
-Sleep 300ms
+Sleep 500ms
 Enter
-Sleep 200ms
+Sleep 500ms
 Type "g"
+Sleep 500ms
+Type "1"
+Enter
+Sleep 500ms
+Type "llllhhhhjjkk"
 Sleep 500ms
 Type "p"
 Sleep 500ms

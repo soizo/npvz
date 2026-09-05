@@ -303,8 +303,7 @@ static void draw_grid(const Board *b, const BoardLayout *layout,
             const Plant *plant = &b->cells[row][col];
             int selected = row == cursor_row && col == cursor_col;
             int flashing = b->plant_flash_ticks[row][col] > 0;
-            int attrs = flashing ? COLOR_PAIR(UI_PAIR_ACTION_FLASH)
-                      : selected ? COLOR_PAIR(UI_PAIR_CURSOR) | A_BOLD : 0;
+            int attrs = flashing ? COLOR_PAIR(UI_PAIR_ACTION_FLASH) : 0;
 
             if (attrs) attron(attrs);
             if (flashing && (plant->type == PLANT_NONE || plant->hp <= 0))
@@ -314,8 +313,8 @@ static void draw_grid(const Board *b, const BoardLayout *layout,
                 const wchar_t *glyph = plant_glyph(plant, &terminal_width);
                 (void)terminal_width;
                 mvprintw(y, x, "%ls", glyph);
-            } else if (!flashing) {
-                mvprintw(y, x, "%ls", selected ? L"◆" : L"·");
+            } else if (!flashing && !selected) {
+                mvprintw(y, x, "%ls", L"·");
             }
             if (attrs) attroff(attrs);
         }
@@ -562,6 +561,12 @@ void render_frame(const Game *g) {
     draw_crowds(&g->board, crowds, crowd_count, &layout);
     draw_projectiles(&g->board, &layout);
     draw_blast_effects(&g->board, &layout);
+    int cursor_x = board_x(&layout, g->cursor_row,
+                           GRID_LEFT + g->cursor_col * CELL_WIDTH);
+    mvchgat(grid_top() + g->cursor_row * CELL_HEIGHT, cursor_x, 2,
+            A_NORMAL, UI_PAIR_CURSOR, NULL);
+    /* Emoji width compensation makes ncurses row diffs unreliable. */
+    wredrawln(stdscr, grid_top(), BOARD_ROWS * CELL_HEIGHT);
     ui_draw_game_footer(g, grid_bottom());
 
     int overlay_center = (grid_top() + grid_bottom() - 1) / 2;

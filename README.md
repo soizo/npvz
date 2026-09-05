@@ -28,7 +28,7 @@ Plants vs. Zombies in your terminal — ncurses-based, emoji-rendered, chiptune-
 | Card selection | Enter / Space | Add or remove a plant |
 | Card selection | Enter | Activate the focused Start or Menu button |
 | Card selection | G / Q or Esc | Start the game / return to menu |
-| Game | Arrow keys / HJKL | Move cursor, wrapping at board edges |
+| Game | Arrow keys / HJKL | Move cursor; combine axes for diagonal movement; wraps at edges |
 | Game | Tab | Move to the next row in the current column, wrapping to the top |
 | Game | 1–9 | Select a deck slot |
 | Game | Q/W/E/R | Select deck slots 6/7/8/9 |

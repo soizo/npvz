@@ -1,11 +1,10 @@
-#define _XOPEN_SOURCE_EXTENDED 1
 #include "game.h"
 #include "render.h"
 #include "sound.h"
 #include <ncurses.h>
-#include <unistd.h>
 
-#define FRAME_DELAY_US  33333  /* ~30 fps */
+#define FRAME_DELAY_MS 33  /* ~30 fps */
+#define INPUTS_PER_FRAME 16
 
 int main(void) {
     sound_init();
@@ -16,13 +15,17 @@ int main(void) {
 
     int quit = 0;
     while (!quit) {
-        int ch = getch();
-        if (ch != ERR) quit = game_handle_input(&game, ch);
+        int inputs[INPUTS_PER_FRAME];
+        int input_count = 0;
+        int ch;
+        while (input_count < INPUTS_PER_FRAME && (ch = getch()) != ERR)
+            inputs[input_count++] = ch;
+        quit = game_handle_inputs(&game, inputs, input_count);
         if (quit) break;
 
         game_update(&game);
         render_frame(&game);
-        usleep(FRAME_DELAY_US);
+        napms(FRAME_DELAY_MS);
     }
 
     render_cleanup();

@@ -130,13 +130,17 @@ void game_start_playing(Game *g) {
     }
 }
 
+static int wrap_index(int index, int delta, int count) {
+    return (index + count + delta) % count;
+}
+
 static int handle_menu_input(Game *g, int ch) {
     switch (ch) {
     case KEY_UP: case 'k':
-        if (g->menu_selection > 0) g->menu_selection--;
+        g->menu_selection = wrap_index(g->menu_selection, -1, 3);
         break;
     case KEY_DOWN: case 'j':
-        if (g->menu_selection < 2) g->menu_selection++;
+        g->menu_selection = wrap_index(g->menu_selection, 1, 3);
         break;
     case '\n': case '\r':
         if (g->menu_selection == 2) return 1;
@@ -176,10 +180,10 @@ static int handle_card_select_input(Game *g, int ch) {
 
     switch (ch) {
     case KEY_UP: case 'k':
-        if (g->card_cursor > 0) g->card_cursor--;
+        g->card_cursor = wrap_index(g->card_cursor, -1, plant_count);
         break;
     case KEY_DOWN: case 'j':
-        if (g->card_cursor < plant_count - 1) g->card_cursor++;
+        g->card_cursor = wrap_index(g->card_cursor, 1, plant_count);
         break;
     case KEY_LEFT: case 'h':
         if (g->max_slots > 6) {
@@ -215,10 +219,10 @@ static int handle_card_select_input(Game *g, int ch) {
 }
 
 static int handle_end_input(Game *g, int ch) {
-    if ((ch == KEY_UP || ch == 'k') && g->menu_selection > 0)
-        g->menu_selection--;
-    else if ((ch == KEY_DOWN || ch == 'j') && g->menu_selection < 1)
-        g->menu_selection++;
+    if (ch == KEY_UP || ch == 'k')
+        g->menu_selection = wrap_index(g->menu_selection, -1, 2);
+    else if (ch == KEY_DOWN || ch == 'j')
+        g->menu_selection = wrap_index(g->menu_selection, 1, 2);
     else if (ch == '\n' || ch == '\r') {
         if (g->menu_selection == 0) game_enter_card_select(g);
         else game_init(g);
@@ -236,10 +240,10 @@ static int handle_play_input(Game *g, int ch) {
             g->state = STATE_PLAYING;
             return 0;
         }
-        if ((ch == KEY_UP || ch == 'k') && g->menu_selection > 0)
-            g->menu_selection--;
-        else if ((ch == KEY_DOWN || ch == 'j') && g->menu_selection < 2)
-            g->menu_selection++;
+        if (ch == KEY_UP || ch == 'k')
+            g->menu_selection = wrap_index(g->menu_selection, -1, 3);
+        else if (ch == KEY_DOWN || ch == 'j')
+            g->menu_selection = wrap_index(g->menu_selection, 1, 3);
         else if (ch == '\n' || ch == '\r') {
             if (g->menu_selection == 0) g->state = STATE_PLAYING;
             else if (g->menu_selection == 1) g->help_visible = 1;
@@ -340,6 +344,12 @@ int game_handle_input(Game *g, int ch) {
     case STATE_LOST:
         return handle_end_input(g, ch);
     }
+    return 0;
+}
+
+int game_handle_inputs(Game *g, const int *inputs, int count) {
+    for (int i = 0; i < count; i++)
+        if (game_handle_input(g, inputs[i])) return 1;
     return 0;
 }
 

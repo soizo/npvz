@@ -3,6 +3,8 @@
 
 #include "game.h"
 
+#define UI_CANVAS_WIDTH 80
+
 typedef enum {
     UI_PAIR_SUN = 1,
     UI_PAIR_READY,
@@ -26,6 +28,7 @@ typedef struct {
 } EmojiWidths;
 
 void ui_set_emoji_widths(const EmojiWidths *widths, int table_enabled);
+void ui_set_origin_x(int x);
 void ui_draw_hud(const Game *g, int start_y);
 void ui_draw_game_footer(const Game *g, int start_y);
 void ui_draw_feedback(const Game *g, int y);

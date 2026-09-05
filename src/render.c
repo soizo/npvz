@@ -18,7 +18,7 @@
 #define MOWER_LEFT 5
 #define GRID_LEFT 9
 #define GAME_MIN_ROWS 24
-#define GAME_MIN_COLS 80
+#define GAME_MIN_COLS UI_CANVAS_WIDTH
 #define WIDTH_QUERY_TIMEOUT_US 50000
 #define BOARD_WIDTH (GRID_LEFT + BOARD_COLS * CELL_WIDTH + CELL_WIDTH)
 
@@ -26,6 +26,7 @@ static const wchar_t *ARMED_MINE_EMOJI = L"🕹\uFE0F";
 static const wchar_t *ANGRY_ZOMBIE_EMOJI = L"😡\uFE0F";
 static const wchar_t *EXPLOSION_EMOJI = L"💥";
 static EmojiWidths emoji_widths;
+static int canvas_left;
 
 static int write_terminal(const char *bytes, size_t length) {
     while (length > 0) {
@@ -274,14 +275,14 @@ static void build_board_layout(const Board *b, const ZombieCrowd *crowds,
 }
 
 static int board_x(const BoardLayout *layout, int row, int physical_x) {
-    if (physical_x < 0) return physical_x;
+    if (physical_x < 0) return canvas_left + physical_x;
     if (physical_x > BOARD_WIDTH) physical_x = BOARD_WIDTH;
-    return physical_x + layout->before[row][physical_x];
+    return canvas_left + physical_x + layout->before[row][physical_x];
 }
 
 static void clear_grid_area(void) {
     for (int row = 0; row < BOARD_ROWS * CELL_HEIGHT; row++) {
-        move(grid_top() + row, 0);
+        move(grid_top() + row, canvas_left);
         clrtoeol();
     }
 }
@@ -292,7 +293,7 @@ static void draw_grid(const Board *b, const BoardLayout *layout,
 
     for (int row = 0; row < BOARD_ROWS; row++) {
         int y = grid_top() + row * CELL_HEIGHT;
-        mvprintw(y, 0, "%02d ▸", row + 1);
+        mvprintw(y, canvas_left, "%02d ▸", row + 1);
 
         if (b->mowers[row].active && !b->mowers[row].triggered)
             mvprintw(y, board_x(layout, row, MOWER_LEFT), "%ls", MOWER_EMOJI);
@@ -399,10 +400,9 @@ static void draw_blast_effects(const Board *b, const BoardLayout *layout) {
 }
 
 static void draw_menu(const Game *g) {
-    int rows, cols;
-    getmaxyx(stdscr, rows, cols);
+    int rows = getmaxy(stdscr);
     int top = (rows - 14) / 2;
-    int left = cols / 2 - 12;
+    int left = canvas_left + 13;
 
     attron(A_BOLD | COLOR_PAIR(UI_PAIR_READY));
     mvprintw(top, left,     " _ __  _ ____   _____");
@@ -424,16 +424,16 @@ static void draw_menu(const Game *g) {
     for (int i = 0; i < 3; i++) {
         int y = top + 6 + i * 2;
         if (i == g->menu_selection) attron(A_REVERSE | A_BOLD);
-        mvprintw(y, cols / 2 - 12, "%c %-20s",
+        mvprintw(y, left, "%c %-20s",
                  i == g->menu_selection ? '>' : ' ', labels[i]);
         if (i == g->menu_selection) attroff(A_REVERSE | A_BOLD);
         attron(A_DIM);
-        mvprintw(y + 1, cols / 2 - 12, "  %s", descriptions[i]);
+        mvprintw(y + 1, left, "  %s", descriptions[i]);
         attroff(A_DIM);
     }
 
     attron(COLOR_PAIR(UI_PAIR_INFO));
-    mvprintw(top + 13, cols / 2 - 18,
+    mvprintw(top + 13, canvas_left + 7,
              "MOVE//UP DOWN J K  CHOOSE//ENTER");
     attroff(COLOR_PAIR(UI_PAIR_INFO));
 }
@@ -446,16 +446,13 @@ static int deck_contains(const Game *g, PlantType type) {
 }
 
 static void draw_card_select(const Game *g) {
-    int rows, cols;
-    getmaxyx(stdscr, rows, cols);
-    (void)rows;
-
     attron(A_BOLD | COLOR_PAIR(UI_PAIR_READY));
-    mvprintw(1, 2, "CHOOSE YOUR PLANTS");
+    mvprintw(1, canvas_left + 2, "CHOOSE YOUR PLANTS");
     attroff(A_BOLD | COLOR_PAIR(UI_PAIR_READY));
-    mvprintw(2, 2, "DECK//%d OF %d", g->deck_count, g->max_slots);
+    mvprintw(2, canvas_left + 2, "DECK//%d OF %d",
+             g->deck_count, g->max_slots);
 
-    int x = 2;
+    int x = canvas_left + 2;
     int deck_delta = 0;
     for (int i = 0; i < g->max_slots; i++) {
         int draw_x = x + deck_delta;
@@ -470,8 +467,8 @@ static void draw_card_select(const Game *g) {
     }
 
     attron(COLOR_PAIR(UI_PAIR_INFO));
-    mvprintw(4, 2, "PLANT LIST");
-    mvprintw(4, 40, "PLANT DATA");
+    mvprintw(4, canvas_left + 2, "PLANT LIST");
+    mvprintw(4, canvas_left + 40, "PLANT DATA");
     attroff(COLOR_PAIR(UI_PAIR_INFO));
 
     for (int i = 1; i < PLANT_COUNT; i++) {
@@ -483,9 +480,9 @@ static void draw_card_select(const Game *g) {
         if (selected) attron(A_REVERSE);
         if (in_deck) attron(A_BOLD | COLOR_PAIR(UI_PAIR_READY));
         int curses_width = fallback_width(def->emoji);
-        int name_x = 5 + plant_delta((PlantType)i);
-        mvprintw(y, 2, "%ls", def->emoji);
-        for (int cell = 2 + curses_width; cell < name_x; cell++)
+        int name_x = canvas_left + 5 + plant_delta((PlantType)i);
+        mvprintw(y, canvas_left + 2, "%ls", def->emoji);
+        for (int cell = canvas_left + 2 + curses_width; cell < name_x; cell++)
             mvaddch(y, cell, ' ' | A_BOLD);
         mvprintw(y, name_x, "%-12s %3d  %-9s",
                  def->name, def->cost, in_deck ? "IN DECK" : "AVAILABLE");
@@ -494,36 +491,36 @@ static void draw_card_select(const Game *g) {
     }
 
     const PlantDef *focused = &PLANT_DEFS[g->card_cursor + 1];
-    mvprintw(6, 40, "PLANT//%s", focused->name);
-    mvprintw(8, 40, "COST   %d SUN", focused->cost);
-    mvprintw(9, 40, "HEALTH %d", focused->hp);
+    mvprintw(6, canvas_left + 40, "PLANT//%s", focused->name);
+    mvprintw(8, canvas_left + 40, "COST   %d SUN", focused->cost);
+    mvprintw(9, canvas_left + 40, "HEALTH %d", focused->hp);
     if (focused->shoot_interval > 0)
-        mvprintw(10, 40, "ATTACK %d TICKS", focused->shoot_interval);
+        mvprintw(10, canvas_left + 40, "ATTACK %d TICKS", focused->shoot_interval);
     else
-        mvprintw(10, 40, "ATTACK -");
+        mvprintw(10, canvas_left + 40, "ATTACK -");
     if (focused->sun_interval > 0)
-        mvprintw(11, 40, "SUN    %d TICKS", focused->sun_interval);
+        mvprintw(11, canvas_left + 40, "SUN    %d TICKS", focused->sun_interval);
     else
-        mvprintw(11, 40, "SUN    -");
+        mvprintw(11, canvas_left + 40, "SUN    -");
 
     ui_draw_feedback(g, 16);
     if (g->deck_count == 0) {
         attron(A_DIM);
-        mvprintw(17, 2, "SELECT AT LEAST ONE PLANT");
+        mvprintw(17, canvas_left + 2, "SELECT AT LEAST ONE PLANT");
         attroff(A_DIM);
     }
 
     int start_attrs = (g->card_focus == 1 ? A_REVERSE | A_BOLD : 0)
                     | (g->deck_count == 0 ? A_DIM : 0);
     if (start_attrs) attron(start_attrs);
-    mvprintw(18, cols / 2 - 11, "  START  ");
+    mvprintw(18, canvas_left + 29, "  START  ");
     if (start_attrs) attroff(start_attrs);
     if (g->card_focus == 2) attron(A_REVERSE | A_BOLD);
-    mvprintw(18, cols / 2 + 2, "  MENU  ");
+    mvprintw(18, canvas_left + 42, "  MENU  ");
     if (g->card_focus == 2) attroff(A_REVERSE | A_BOLD);
 
     attron(COLOR_PAIR(UI_PAIR_INFO));
-    mvprintw(20, (cols - 66) / 2,
+    mvprintw(20, canvas_left + 7,
              "NAV//ARROWS HJKL  TOGGLE//ENTER  FOCUS//TAB  START//G  MENU//Q ESC");
     attroff(COLOR_PAIR(UI_PAIR_INFO));
 }
@@ -538,6 +535,9 @@ void render_frame(const Game *g) {
         refresh();
         return;
     }
+
+    canvas_left = (cols - min_cols) / 2;
+    ui_set_origin_x(canvas_left);
 
     if (g->state == STATE_MENU) {
         draw_menu(g);

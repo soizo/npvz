@@ -1,0 +1,21 @@
+Output "/tmp/npvz-centered-layout.png"
+Set Shell "bash"
+Set Width 1200
+Set Height 700
+Set FontSize 14
+Set TypingSpeed 10ms
+
+Type "TERM=xterm-256color ./npvz"
+Enter
+Sleep 1s
+Enter
+Sleep 300ms
+Enter
+Sleep 200ms
+Type "g"
+Sleep 500ms
+Type "p"
+Sleep 500ms
+Type "j"
+Enter
+Sleep 500ms

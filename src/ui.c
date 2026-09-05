@@ -20,9 +20,11 @@
 #endif
 
 static EmojiWidths emoji_widths;
+static int ui_origin_x;
 static wchar_t pause_art[PAUSE_ART_ROWS][PAUSE_ART_COLS];
 static int pause_art_loaded;
 static int pause_art_rows;
+static int pause_art_width;
 
 static int load_pause_art(void) {
     if (pause_art_loaded) return pause_art_rows;
@@ -40,7 +42,7 @@ static int load_pause_art(void) {
     while (pause_art_rows < PAUSE_ART_ROWS && fgets(line, sizeof(line), file)) {
         line[strcspn(line, "\r\n")] = '\0';
         char *start = line;
-        while (*start == ' ' || *start == '\t') start++;
+        if (*start == ' ' || *start == '\t') start++;
         char *end = start + strlen(start);
         while (end > start && (end[-1] == ' ' || end[-1] == '\t')) end--;
         *end = '\0';
@@ -50,6 +52,9 @@ static int load_pause_art(void) {
                                  PAUSE_ART_COLS - 1);
         if (length == (size_t)-1) continue;
         pause_art[pause_art_rows][length] = L'\0';
+        int display_width = wcswidth(pause_art[pause_art_rows], PAUSE_ART_COLS);
+        if (display_width < 0) display_width = (int)length;
+        if (display_width > pause_art_width) pause_art_width = display_width;
         pause_art_rows++;
     }
     fclose(file);
@@ -59,6 +64,10 @@ static int load_pause_art(void) {
 void ui_set_emoji_widths(const EmojiWidths *widths, int table_enabled) {
     emoji_widths = *widths;
     (void)table_enabled;
+}
+
+void ui_set_origin_x(int x) {
+    ui_origin_x = x;
 }
 
 static void add_field_separator(void) {
@@ -79,7 +88,7 @@ static void add_context_separator(int field_attrs) {
 
 static void draw_rule(int y) {
     attron(COLOR_PAIR(UI_PAIR_INFO));
-    move(y, 0);
+    move(y, ui_origin_x);
     hline(ACS_HLINE, RULE_WIDTH);
     attroff(COLOR_PAIR(UI_PAIR_INFO));
 }
@@ -141,7 +150,7 @@ static void draw_deck_rule(int y, int top) {
     draw_rule(y);
     if (!top) return;
     attron(A_BOLD | COLOR_PAIR(UI_PAIR_INFO));
-    mvaddstr(y, 0, "DECK ONLINE");
+    mvaddstr(y, ui_origin_x, "DECK ONLINE");
     attroff(A_BOLD | COLOR_PAIR(UI_PAIR_INFO));
 }
 
@@ -151,7 +160,7 @@ static void draw_deck_row(const Game *g, int deck_row, int y) {
     int slots = g->deck_count + 1;
     if (end > slots) end = slots;
 
-    move(y, 0);
+    move(y, ui_origin_x);
     for (int slot = first; slot < end; slot++) {
         if (slot < g->deck_count)
             draw_deck_card(g, slot);
@@ -174,10 +183,10 @@ void ui_draw_hud(const Game *g, int start_y) {
     int display_wave = g->mode == MODE_LEVEL && g->wave > 5 ? 5 : g->wave;
 
     attron(A_BOLD | COLOR_PAIR(UI_PAIR_SUN));
-    mvprintw(start_y, 0, "%ls %d", UI_SUN, g->sun);
+    mvprintw(start_y, ui_origin_x, "%ls %d", UI_SUN, g->sun);
     attroff(A_BOLD | COLOR_PAIR(UI_PAIR_SUN));
 
-    move(start_y, 9);
+    move(start_y, ui_origin_x + 9);
     addstr(g->mode == MODE_ENDLESS ? "ENDLESS" : "LEVEL");
     add_field_separator();
     if (g->mode == MODE_ENDLESS)
@@ -186,7 +195,7 @@ void ui_draw_hud(const Game *g, int start_y) {
         printw("WAVE %d/5", display_wave);
 
     attron(A_BOLD | COLOR_PAIR(UI_PAIR_DANGER));
-    mvprintw(start_y, 34, "THREAT//");
+    mvprintw(start_y, ui_origin_x + 34, "THREAT//");
     for (int row = 0; row < BOARD_ROWS; row++)
         addwstr(row_has_zombie(&g->board, row) ? L"█" : L"░");
     attroff(A_BOLD | COLOR_PAIR(UI_PAIR_DANGER));
@@ -238,12 +247,13 @@ static void draw_context_table(const Game *g, int y) {
 
     draw_rule(y);
     attron(COLOR_PAIR(UI_PAIR_INFO));
-    mvaddch(y, first_separator, ACS_TTEE);
-    if (second_separator >= 0) mvaddch(y, second_separator, ACS_TTEE);
+    mvaddch(y, ui_origin_x + first_separator, ACS_TTEE);
+    if (second_separator >= 0)
+        mvaddch(y, ui_origin_x + second_separator, ACS_TTEE);
     attroff(COLOR_PAIR(UI_PAIR_INFO));
 
     if (attrs != 0) attron(attrs);
-    mvaddstr(y + 1, 0, primary);
+    mvaddstr(y + 1, ui_origin_x, primary);
     add_context_separator(attrs);
     if (has_cost) {
         printw("%ls %d", UI_SUN, cost);
@@ -274,14 +284,15 @@ void ui_draw_feedback(const Game *g, int y) {
         if (g->selected_plant != PLANT_NONE) {
             int missing = PLANT_DEFS[g->selected_plant].cost - g->sun;
             attron(A_BOLD | COLOR_PAIR(UI_PAIR_DANGER));
-            mvprintw(y, 0, "NEED %d MORE SUN", missing > 0 ? missing : 0);
+            mvprintw(y, ui_origin_x, "NEED %d MORE SUN",
+                     missing > 0 ? missing : 0);
             attroff(A_BOLD | COLOR_PAIR(UI_PAIR_DANGER));
         }
         return;
     }
 
     attron(A_BOLD | COLOR_PAIR(attrs));
-    mvprintw(y, 0, "%s", message);
+    mvprintw(y, ui_origin_x, "%s", message);
     if (detail != NULL) {
         add_field_separator();
         printw("%s", detail);
@@ -293,7 +304,7 @@ void ui_draw_game_footer(const Game *g, int start_y) {
     draw_context_table(g, start_y);
     ui_draw_feedback(g, start_y + 2);
     attron(COLOR_PAIR(UI_PAIR_INFO));
-    mvprintw(start_y + 3, 0,
+    mvprintw(start_y + 3, ui_origin_x,
              "MOVE//HJKL TAB  SELECT//1-9 QWERT  DEPLOY//ENTER  PAUSE//P ESC");
     attroff(COLOR_PAIR(UI_PAIR_INFO));
 }
@@ -320,11 +331,8 @@ static void draw_box(int top, int left, int height, int width) {
 
 void ui_draw_help(const Game *g, int center_y) {
     (void)g;
-    int rows, cols;
-    getmaxyx(stdscr, rows, cols);
-    (void)rows;
     int top = center_y - 6;
-    int left = (cols - 50) / 2;
+    int left = ui_origin_x + (UI_CANVAS_WIDTH - 50) / 2;
 
     draw_box(top, left, 12, 50);
     attron(A_BOLD | COLOR_PAIR(UI_PAIR_INFO));
@@ -341,14 +349,11 @@ void ui_draw_help(const Game *g, int center_y) {
 }
 
 void ui_draw_pause(const Game *g, int center_y) {
-    int rows, cols;
-    getmaxyx(stdscr, rows, cols);
-    (void)rows;
     int art_rows = load_pause_art();
     int height = art_rows > 0 ? 13 : 9;
     int width = art_rows > 0 ? 62 : 40;
     int top = center_y - height / 2;
-    int left = (cols - width) / 2;
+    int left = ui_origin_x + (UI_CANVAS_WIDTH - width) / 2;
     int title_x = art_rows > 0 ? left + 40 : left + 17;
     int item_x = art_rows > 0 ? left + 34 : left + 14;
     int footer_x = art_rows > 0 ? left + 27 : left + 4;
@@ -356,14 +361,9 @@ void ui_draw_pause(const Game *g, int center_y) {
 
     draw_box(top, left, height, width);
     if (art_rows > 0) {
-        for (int i = 0; i < art_rows; i++) {
-            int display_width = wcswidth(pause_art[i], PAUSE_ART_COLS);
-            if (display_width < 0)
-                display_width = (int)wcslen(pause_art[i]);
-            mvaddwstr(top + 1 + i,
-                      left + 2 + (PAUSE_ART_WIDTH - display_width) / 2,
-                      pause_art[i]);
-        }
+        int art_x = left + 2 + (PAUSE_ART_WIDTH - pause_art_width) / 2;
+        for (int i = 0; i < art_rows; i++)
+            mvaddwstr(top + 1 + i, art_x, pause_art[i]);
         for (int y = 1; y < height - 1; y++) mvaddch(top + y, left + 24, '|');
     }
     attron(A_BOLD | COLOR_PAIR(UI_PAIR_INFO));
@@ -382,12 +382,9 @@ void ui_draw_pause(const Game *g, int center_y) {
 }
 
 void ui_draw_endscreen(const Game *g, int center_y) {
-    int rows, cols;
     int display_wave = g->mode == MODE_LEVEL && g->wave > 5 ? 5 : g->wave;
-    getmaxyx(stdscr, rows, cols);
-    (void)rows;
     int top = center_y - 4;
-    int left = (cols - 40) / 2;
+    int left = ui_origin_x + (UI_CANVAS_WIDTH - 40) / 2;
     int pair = g->state == STATE_WON ? UI_PAIR_READY : UI_PAIR_DANGER;
     static const char *items[] = { "RESELECT", "MENU" };
 
